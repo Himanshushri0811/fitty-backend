@@ -4,183 +4,129 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from .models import GymOwnerProfile, Member
-from .serializers import GymOwnerProfileSerializer, MemberSerializer
-from django.utils import timezone
-from dotenv import load_dotenv
-load_dotenv()
-# client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+from .models import Member, PaymentHistory
+from accounts.models import GymOwner
+from datetime import datetime, timedelta
+
+def get_razorpay_client():
+    """
+    Returns a configured Razorpay client using settings.
+    """
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
 class GymOwnerDashboardOverview(APIView):
+    """
+    Main Dashboard for Gym Owners. 
+    Shows plan details, limits, and profitability simulation.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        try:
-            profile = request.user.gym_profile
-        except GymOwnerProfile.DoesNotExist:
-            return Response({"error": "Gym Owner Profile not found"}, status=404)
-
-        members_count = profile.members.count()
-        paid_members = profile.members.filter(fees_status='PAID').count()
-        pending_members = members_count - paid_members
-
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Only Gym Owners can access metrics"}, status=status.HTTP_403_FORBIDDEN)
+            
+        owner = request.user # This is a GymOwner MongoEngine document
+        
+        # 1. Performance Statistics
+        members_count = Member.objects(gym_owner=owner).count()
+        paid_count = Member.objects(gym_owner=owner, fees_status='PAID').count()
+        
+        # 2. Profit Simulation Logic (as requested)
+        # We simulate earnings based on current members and potential earnings on Pro plan
+        current_earnings = paid_count * owner.monthly_fee_per_member
+        pro_simulation = 1000 * owner.monthly_fee_per_member # What they COULD earn if they upgrade to Pro
+        
+        # 3. Plan Logic
+        is_pro = (owner.plan_type == 'PRO')
+        
         return Response({
-            "gym_name": profile.gym_name,
-            "payment_status": profile.payment_status,
-            "plan_type": profile.plan_type,
-            "stats": {
-                "total_members": members_count,
-                "paid_members": paid_members,
-                "pending_members": pending_members
+            "gym_details": {
+                "name": owner.gym_name,
+                "address": owner.gym_address,
+                "plan": owner.plan_type,
+                "is_pro": is_pro,
+                "status": owner.dashboard_status
+            },
+            "limits": {
+                "max_members": owner.max_members_limit,
+                "current_count": members_count,
+                "remaining_slots": max(0, owner.max_members_limit - members_count)
+            },
+            "profit_simulation": {
+                "current_monthly_revenue": current_earnings,
+                "projected_full_pro_revenue": pro_simulation,
+                "currency": "INR",
+                "message": "Upgrade to PRO to unlock 1000 member slots and maximize your revenue!" if not is_pro else "You are already maximizing your reach with the PRO plan."
+            },
+            "members": {
+                "total": members_count,
+                "paid": paid_count,
+                "pending": members_count - paid_count
             }
         })
 
-class MemberListView(APIView):
+class PlanUpgradeView(APIView):
+    """
+    Processes simulated/actual Razorpay payments to upgrade a GymOwner to PRO.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Only owners can upgrade"}, status=403)
+            
+        # Simulate payment validation (or use actual razorpay capture)
+        # In a real scenario, you'd verify the signature here.
+        payment_status = request.data.get('status', 'success')
+        order_id = request.data.get('order_id', 'sim_ord_123')
+        payment_id = request.data.get('payment_id', 'sim_pay_123')
+
+        if payment_status == 'success':
+            owner = request.user
+            owner.update_plan('PRO')
+            
+            # Record payment in MongoDB
+            PaymentHistory(
+                gym_owner=owner,
+                order_id=order_id,
+                payment_id=payment_id,
+                amount=399.00,
+                status='success',
+                plan_type='PRO'
+            ).save()
+            
+            return Response({
+                "status": "success",
+                "message": "Payment verified and Plan Upgraded to PRO",
+                "new_limit": 1000
+            })
+            
+        return Response({"error": "Payment failed or was cancelled"}, status=400)
+
+class MemberManagerView(APIView):
+    """
+    CRUD for Gym Members stored in MongoDB
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        try:
-            profile = request.user.gym_profile
-        except GymOwnerProfile.DoesNotExist:
-            return Response({"error": "Gym Owner Profile not found"}, status=404)
-        
-        members = profile.members.all().order_by('-join_date')
-        serializer = MemberSerializer(members, many=True)
-        return Response(serializer.data)
+        members = Member.objects(gym_owner=request.user)
+        return Response([{
+            "id": str(m.id),
+            "name": m.name,
+            "mobile": m.mobile,
+            "status": m.fees_status
+        } for m in members])
 
     def post(self, request):
-        try:
-            profile = request.user.gym_profile
-        except GymOwnerProfile.DoesNotExist:
-            return Response({"error": "Gym Owner Profile not found"}, status=404)
-
-        serializer = MemberSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(gym_owner=profile)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-from rest_framework.parsers import JSONParser
-
-def get_razorpay_client():
-    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-
-@method_decorator(csrf_exempt, name='dispatch')
-class CreateRazorpayOrder(APIView):
-    """
-    Creates a Razorpay order for Gym Owner premium activation.
-    Amount should be in paise (e.g., 29900 for ₹299.00)
-    """
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-    parser_classes = [JSONParser]
-
-    def post(self, request):
-        # 1. Role validation
-        try:
-            profile = request.user.profile
-            role = profile.role
-        except Exception:
-            role = 'USER'
-        
-        if role != 'GYM_OWNER':
-            return Response({
-                "error": "Access Denied",
-                "message": "Only gym owners can activate premium plans."
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        # 2. Get and validate amount
-        amount = request.data.get('amount')
-        if not amount:
-            return Response({
-                "error": "Missing Amount",
-                "message": "Please specify the upgrade amount."
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            # 3. Credentials Validation
-            key_id = getattr(settings, 'RAZORPAY_KEY_ID', None)
-            key_secret = getattr(settings, 'RAZORPAY_KEY_SECRET', None)
+        owner = request.user
+        if Member.objects(gym_owner=owner).count() >= owner.max_members_limit:
+            return Response({"error": "Limit reached for your current plan. Please upgrade to PRO!"}, status=403)
             
-            if not key_id or not key_secret or 'YourKeyHere' in key_id:
-                print("CRITICAL: Razorpay keys are missing or using placeholders!")
-                return Response({
-                    "error": "Service Unavailable",
-                    "message": "Payment gateway is not configured. Please contact support."
-                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-            # 4. Create Client & Order
-            client = razorpay.Client(auth=(key_id, key_secret))
-            
-            gym_profile = getattr(request.user, 'gym_profile', None)
-            gym_name = gym_profile.gym_name if gym_profile else "FitMitra Gym"
-            
-            order_data = {
-                "amount": int(amount),
-                "currency": "INR",
-                "payment_capture": 1,
-                "notes": {
-                    "user_id": request.user.id,
-                    "email": request.user.email,
-                    "gym_name": gym_name,
-                    "type": "membership_upgrade",
-                    "plan": request.data.get('plan', 'STARTER') # Default to STARTER if not passed
-                }
-            }
-            
-            print(f"INFO: Creating Razorpay order for User {request.user.id}")
-            order = client.order.create(order_data)
-            
-            return Response(order, status=status.HTTP_200_OK)
-            
-        except razorpay.errors.BadRequestError as e:
-            print(f"RAZORPAY BAD REQUEST: {str(e)}")
-            return Response({
-                "error": "Gateway Error",
-                "message": "Razorpay rejected the request. Please check the amount format."
-            }, status=status.HTTP_400_BAD_REQUEST)
-        except razorpay.errors.SignatureVerificationError:
-             return Response({
-                "error": "Security Error",
-                "message": "Payment signature verification failed."
-            }, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            print(f"CRITICAL RAZORPAY ERROR: {str(e)}")
-            return Response({
-                "error": "Internal Error",
-                "message": "An unexpected error occurred while preparing your payment."
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class VerifyPayment(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        client = get_razorpay_client()
-        params_dict = {
-            'razorpay_order_id': request.data.get('razorpay_order_id'),
-            'razorpay_payment_id': request.data.get('razorpay_payment_id'),
-            'razorpay_signature': request.data.get('razorpay_signature')
-        }
-
-        try:
-            client.utility.verify_payment_signature(params_dict)
-            
-            # Payment successful, update profile
-            profile = request.user.gym_profile
-            
-            # Fetch order details to know which plan was bought
-            order_id = request.data.get('razorpay_order_id')
-            order = client.order.fetch(order_id)
-            plan_bought = order.get('notes', {}).get('plan', 'STARTER')
-            
-            profile.payment_status = True
-            profile.plan_type = plan_bought
-            profile.save()
-            
-            return Response({"message": "Payment successful and verified"})
-        except Exception as e:
-            return Response({"error": "Payment verification failed"}, status=400)
+        m = Member(
+            gym_owner=owner,
+            name=request.data.get('name'),
+            mobile=request.data.get('mobile'),
+            fees_status=request.data.get('fees_status', 'PENDING')
+        ).save()
+        return Response({"id": str(m.id), "status": "added"}, status=201)

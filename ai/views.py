@@ -14,7 +14,7 @@ class AIChatAPIView(APIView):
         user_goal = "general fitness"
         try:
             if request.user and request.user.is_authenticated:
-                user_goal = request.user.profile.goal if hasattr(request.user, 'profile') and request.user.profile.goal else "general fitness"
+                user_goal = getattr(request.user, 'goal', 'general fitness')
         except:
             user_goal = "general fitness"
 

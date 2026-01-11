@@ -1,113 +1,129 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework import status, generics, parsers
-from django.contrib.auth.models import User
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Profile
-from .serializers import RegisterSerializer, ProfileSerializer, UserSerializer, GymOwnerRegisterSerializer
+from rest_framework import status
+from .models import User, GymOwner
+from .authentication import generate_jwt
+import razorpay
+from django.conf import settings
+from datetime import datetime
+import mongoengine
 
-class SignupView(APIView):
-    permission_classes = [AllowAny]
+class HealthCheckView(APIView):
+    def get(self, request):
+        try:
+            mongoengine.get_db().command('ping')
+            return Response({"mongo": "connected", "status": "ok"})
+        except Exception as e:
+            return Response({"mongo": "error", "message": str(e)}, status=503)
 
+class SignupAPIView(APIView):
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
+        data = request.data
+        email = data.get('email', '').strip().lower()
+        password = data.get('password')
         
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
+        # Determine role: Use explicit role or detect via gym_name presence
+        role = data.get('role')
+        if not role:
+            if 'gym_name' in data or 'gym-owner' in request.path:
+                role = 'GYM_OWNER'
+            else:
+                role = 'USER'
+
+        if not email or not password:
+            return Response({'error': 'Email and password required'}, status=400)
+
+        if role == 'GYM_OWNER':
+            if GymOwner.objects(email=email).first():
+                return Response({'error': 'Gym Owner with this email exists'}, status=400)
+            user = GymOwner(
+                email=email, 
+                gym_name=data.get('gym_name', 'My Gym'), 
+                role='GYM_OWNER',
+                gym_address=data.get('gym_address', '')
+            )
+        else:
+            username = data.get('username', email.split('@')[0])
+            if User.objects(email=email).first() or User.objects(username=username).first():
+                return Response({'error': 'Email or Username already taken'}, status=400)
+            user = User(
+                email=email, 
+                username=username, 
+                role='USER',
+                goal=data.get('goal', ''),
+                age=int(data.get('age')) if data.get('age') else None,
+                gender=data.get('gender', '')
+            )
+
+        user.set_password(password)
+        user.save()
+
+        tokens = generate_jwt(user)
         return Response({
-            "message": "Signup successful",
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": UserSerializer(user).data
+            'user': {'email': user.email, 'role': user.role, 'id': str(user.id)},
+            'access': tokens['access'],
+            'refresh': tokens['refresh']
         }, status=201)
 
-class GymOwnerSignupView(APIView):
-    permission_classes = [AllowAny]
-
+class LoginAPIView(APIView):
     def post(self, request):
-        serializer = GymOwnerRegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
+        identifier = request.data.get('username', '').strip().lower()
+        password = request.data.get('password')
+
+        if not identifier or not password:
+            return Response({'error': 'Credentials required'}, status=400)
+
+        user = (GymOwner.objects(email=identifier).first() or 
+                User.objects(email=identifier).first() or 
+                User.objects(username=identifier).first())
+
+        if not user or not user.check_password(password):
+            return Response({'error': 'Invalid Credentials'}, status=401)
+
+        tokens = generate_jwt(user)
         
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
         return Response({
-            "message": "Gym Owner Signup successful",
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": UserSerializer(user).data
-        }, status=201)
-
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        username_or_email = request.data.get("username")
-        password = request.data.get("password")
-
-        # Authenticate by username or email
-        if '@' in username_or_email:
-             # Try to find user by email
-             try:
-                 user_obj = User.objects.get(email=username_or_email)
-                 username = user_obj.username
-             except User.DoesNotExist:
-                 # If email not found, keep as is, authenticate will fail gracefully
-                 username = username_or_email
-        else:
-             username = username_or_email
-
-        user = authenticate(username=username, password=password)
-        if not user:
-            return Response({"error": "Invalid credentials"}, status=401)
-
-        # Record login log
-        from admin_panel.models import LoginLog
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        
-        LoginLog.objects.create(
-            user=user,
-            ip_address=ip,
-            user_agent=request.META.get('HTTP_USER_AGENT', '')
-        )
-
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": UserSerializer(user).data
+            'user': {
+                'email': user.email,
+                'role': user.role,
+                'id': str(user.id),
+                'name': getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                'plan': getattr(user, 'plan_type', 'FREE')
+            },
+            'access': tokens['access'],
+            'refresh': tokens['refresh']
         })
 
-class ProfileDetailView(generics.RetrieveUpdateAPIView):
-    """
-    GET: Retrieve current user's profile
-    PUT/PATCH: Update current user's profile
-    """
-    permission_classes = [IsAuthenticated]
-    serializer_class = ProfileSerializer
+class ProfileView(APIView):
+    def get(self, request):
+        user = request.user
+        if not user:
+            return Response({'error': 'Unauthorized'}, status=401)
+        return Response({
+            'email': user.email,
+            'role': user.role,
+            'id': str(user.id),
+            'name': getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+            'plan': getattr(user, 'plan_type', 'FREE')
+        })
 
-    def get_object(self):
-        # Ensure profile exists
-        profile, created = Profile.objects.get_or_create(user=self.request.user)
-        return profile
-
-class ProfilePictureUploadView(APIView):
-    permission_classes = [IsAuthenticated]
-    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
-
+class VerifyPaymentAPIView(APIView):
     def post(self, request):
-        profile = request.user.profile
-        if 'profile_pic' not in request.data:
-            return Response({"error": "No image provided"}, status=400)
+        razorpay_order_id = request.data.get('razorpay_order_id')
+        razorpay_payment_id = request.data.get('razorpay_payment_id')
+        razorpay_signature = request.data.get('razorpay_signature')
         
-        profile.profile_pic = request.data['profile_pic']
-        profile.save()
-        return Response(ProfileSerializer(profile, context={"request": request}).data, status=200)
+        try:
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            client.utility.verify_payment_signature({
+                'razorpay_order_id': razorpay_order_id,
+                'razorpay_payment_id': razorpay_payment_id,
+                'razorpay_signature': razorpay_signature
+            })
+            
+            if request.user and request.user.role == 'GYM_OWNER':
+                request.user.update_plan('PRO')
+                return Response({'status': 'Payment Verified', 'plan': 'PRO'})
+            return Response({'error': 'User mismatch'}, status=400)
+        except Exception as e:
+            return Response({'error': str(e)}, status=400)
