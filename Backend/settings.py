@@ -1,261 +1,117 @@
-"""
-Django settings for Backend project.
-"""
-
 from pathlib import Path
-from datetime import timedelta
 import os
-from dotenv import load_dotenv
-import warnings
-
-import dj_database_url
+from datetime import timedelta
+from mongo import connect_db
 
 # --------------------------------------------------
-# BASE
+# BASE & BOOTSTRAP
 # --------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-# Look in Backend folder, then Root folder
-load_dotenv(BASE_DIR / '.env', override=True)
-load_dotenv(BASE_DIR.parent / '.env', override=True)
-load_dotenv(BASE_DIR / '.env.local', override=True)
 
-# --------------------------------------------------
-# SECURITY
-# --------------------------------------------------
-SECRET_KEY = os.getenv("SECRET_KEY", "unsafe-dev-key")
+# Security
+SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
-ALLOWED_HOSTS.append('.onrender.com') # Wildcard for Render URLs
-if RENDER_EXTERNAL_HOSTNAME:
-    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+# --------------------------------------------------
+# DATABASE INITIALIZATION (FIRST!)
+# --------------------------------------------------
+connect_db()
 
 # --------------------------------------------------
-# SSL / PROXY SETTINGS (REQUIRED FOR RENDER)
+# CORE CONFIG
 # --------------------------------------------------
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+ALLOWED_HOSTS = ["*"]
 
-# --------------------------------------------------
-# APPLICATIONS
-# --------------------------------------------------
 INSTALLED_APPS = [
-    # Django
-    "django.contrib.admin",
+    # Minimal Django services
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
-
+    
     # Third-party
     "rest_framework",
-    "rest_framework.authtoken",
-    "rest_framework_simplejwt",
     "corsheaders",
-
+    
     # Local Apps
     "accounts",
-    "fitness",
-    "ai",
-    "common",
-    "explore",
-    "admin_panel",
-    "support",
-    "social",
     "gym_management",
+    "ai",
+    "explore",
+    "social",
 ]
 
-# --------------------------------------------------
-# MIDDLEWARE (⚠️ ORDER IS CRITICAL)
-# --------------------------------------------------
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",   # MUST BE FIRST
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-
     "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "gym_management.middleware.GymOwnerPaymentMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
+    # Note: Sessions and default Auth middleware removed for Pure NoSQL JWT
 ]
 
 # --------------------------------------------------
-# CORS CONFIG (REACT FIX)
+# PURE NOSQL ENFORCEMENT
 # --------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = False # Must be False if using credentials
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://fitty-ai.netlify.app",
-]
-if RENDER_EXTERNAL_HOSTNAME:
-     CORS_ALLOWED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
-
-CORS_ALLOW_CREDENTIALS = True
-
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-]
-
-CORS_ALLOW_METHODS = [
-    "DELETE",
-    "GET",
-    "OPTIONS",
-    "PATCH",
-    "POST",
-    "PUT",
-]
-
-# --------------------------------------------------
-# CSRF (JWT BASED AUTH)
-# --------------------------------------------------
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://fitmitra-backend.onrender.com",
-    "https://fitty-ai.netlify.app",
-]
-if RENDER_EXTERNAL_HOSTNAME:
-    CSRF_TRUSTED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
-
-# --------------------------------------------------
-# URL & TEMPLATES
-# --------------------------------------------------
-ROOT_URLCONF = "Backend.urls"
-
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    },
-]
-
-WSGI_APPLICATION = "Backend.wsgi.application"
-
-# --------------------------------------------------
-# DATABASE (PostgreSQL)
-# --------------------------------------------------
-if os.getenv('DATABASE_URL'):
-    DATABASES = {
-        'default': dj_database_url.config(
-            conn_max_age=600,
-            ssl_require=True
-        )
+# Dummy default to satisfy Django core, but no SQL table will ever be created.
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.dummy', 
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 # --------------------------------------------------
-# AUTH
-# --------------------------------------------------
-AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
-]
-
-# --------------------------------------------------
-# REST FRAMEWORK + JWT
+# AUTHENTICATION & SECURITY
 # --------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "accounts.authentication.MongoJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.AllowAny",
     ),
 }
 
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
-    "AUTH_HEADER_TYPES": ("Bearer",),
-}
+CORS_ALLOW_ALL_ORIGINS = True # In production change to specific origins
+CORS_ALLOW_CREDENTIALS = True
 
 # --------------------------------------------------
-# INTERNATIONALIZATION
+# URLS & WSGI
 # --------------------------------------------------
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
-USE_I18N = True
-USE_TZ = True
+ROOT_URLCONF = "Backend.urls"
+WSGI_APPLICATION = "Backend.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+            ],
+        },
+    },
+]
 
 # --------------------------------------------------
-# STATIC FILES
+# STORAGE
 # --------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# --------------------------------------------------
+# EXTRA SETTINGS
+# --------------------------------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# --------------------------------------------------
-# EMAIL (OPTIONAL)
-# --------------------------------------------------
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-
-# --------------------------------------------------
-# LOGGING
-# --------------------------------------------------
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-}
-
-# --------------------------------------------------
-# AI / TENSORFLOW CLEANUP
-# --------------------------------------------------
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-warnings.filterwarnings("ignore", category=UserWarning)
-
-# --------------------------------------------------
-# IMPORTANT
-# --------------------------------------------------
 APPEND_SLASH = False
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Asia/Kolkata"
+USE_I18N = True
+USE_TZ = True
 
-
-from corsheaders.defaults import default_headers
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    "x-csrftoken",
-]
-# --------------------------------------------------
-# RAZORPAY
-# --------------------------------------------------
-RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_YourKeyHere")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "YourSecretHere")
+# Payment Integration (Razorpay)
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")

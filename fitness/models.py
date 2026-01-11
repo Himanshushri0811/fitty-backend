@@ -1,46 +1,34 @@
-from django.db import models
+from mongoengine import Document, StringField, ReferenceField, IntField, CASCADE
+from accounts.models import User
 
+class Goal(Document):
+    user = ReferenceField(User, reverse_delete_rule=CASCADE)
+    name = StringField(required=True)
+    description = StringField()
 
-class Goal(models.Model):
-    name = models.CharField(max_length=50)
-    description = models.TextField()
+    meta = {'collection': 'fitness_goals'}
 
-    def __str__(self):
-        return self.name
+class WorkoutDay(Document):
+    goal = ReferenceField(Goal, reverse_delete_rule=CASCADE)
+    day_name = StringField(max_length=15) # Monday, etc.
+    focus = StringField()
+    order = IntField()
 
+    meta = {'collection': 'workout_days'}
 
-class WorkoutDay(models.Model):
-    goal = models.ForeignKey(Goal, on_delete=models.CASCADE)
-    day_name = models.CharField(max_length=15)
-    focus = models.CharField(max_length=100)
-    order = models.IntegerField()
+class Exercise(Document):
+    name = StringField(required=True)
+    target_muscle = StringField()
 
-    def __str__(self):
-        return f"{self.day_name} - {self.focus}"
+    meta = {'collection': 'exercises'}
 
+class DayExercise(Document):
+    workout_day = ReferenceField(WorkoutDay, reverse_delete_rule=CASCADE)
+    exercise = ReferenceField(Exercise)
+    section = StringField() # warmup, main, etc.
+    sets = IntField()
+    reps = StringField()
+    rest_seconds = IntField()
+    order = IntField()
 
-class Exercise(models.Model):
-    name = models.CharField(max_length=100)
-    target_muscle = models.CharField(max_length=100)
-
-    def __str__(self):
-        return self.name
-
-
-class DayExercise(models.Model):
-    workout_day = models.ForeignKey(WorkoutDay, on_delete=models.CASCADE)
-    exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
-
-    section = models.CharField(max_length=20)  
-    # warmup / main / finisher / cooldown
-
-    sets = models.IntegerField()
-    reps = models.CharField(max_length=20)
-    rest_seconds = models.IntegerField()
-    order = models.IntegerField()
-
-    class Meta:
-        ordering = ["order"]
-
-    def __str__(self):
-        return f"{self.exercise.name} ({self.workout_day.day_name})"
+    meta = {'collection': 'workout_day_exercises'}
