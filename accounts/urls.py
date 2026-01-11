@@ -1,13 +1,10 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
-from .views import SignupView, GymOwnerSignupView, LoginView, ProfileDetailView, ProfilePictureUploadView
+from .views import SignupAPIView, LoginAPIView, ProfileView, VerifyPaymentAPIView
 
 urlpatterns = [
-    path("signup/", SignupView.as_view()), # keep for backward compatibility
-    path("signup/user/", SignupView.as_view()),
-    path("signup/gym-owner/", GymOwnerSignupView.as_view()),
-    path("login/", LoginView.as_view()),
-    path("token/refresh/", TokenRefreshView.as_view(), name='token_refresh'),
-    path("profile/", ProfileDetailView.as_view()),
-    path("profile/upload-pic/", ProfilePictureUploadView.as_view()),
+    path('signup/', SignupAPIView.as_view(), name='signup'),
+    path('signup/gym-owner/', SignupAPIView.as_view(), name='gym-owner-signup'),
+    path('login/', LoginAPIView.as_view(), name='login'),
+    path('profile/', ProfileView.as_view(), name='profile'),
+    path('payments/verify/', VerifyPaymentAPIView.as_view(), name='verify-payment'),
 ]

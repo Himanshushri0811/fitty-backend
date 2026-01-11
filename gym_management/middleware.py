@@ -6,6 +6,9 @@ class GymOwnerPaymentMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if request.method == "OPTIONS":
+            return self.get_response(request)
+
         if request.user.is_authenticated:
             try:
                 role = request.user.profile.role

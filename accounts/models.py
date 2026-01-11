@@ -1,37 +1,77 @@
-from django.db import models
-from django.contrib.auth.models import User
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField
+from datetime import datetime
+import bcrypt
 
-class Profile(models.Model):
-    ROLE_CHOICES = (
-        ('USER', 'User'),
-        ('GYM_OWNER', 'Gym Owner'),
-    )
-    GENDER_CHOICES = (
-        ('male', 'Male'),
-        ('female', 'Female'),
-        ('other', 'Other'),
-    )
+class FitMitraUser(Document):
+    """
+    Base User Document for Pure Mongo Auth
+    No SQL dependencies. Optimized for MongoDB Atlas TLS.
+    """
+    meta = {
+        'allow_inheritance': True,
+        'indexes': ['email'],
+        'abstract': True
+    }
+    
+    email = EmailField(required=True, unique=True)
+    password = StringField(required=True)
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    role = StringField(required=True) # USER, GYM_OWNER
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='USER')
-    
-    # Personal Info
-    profile_pic = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
-    bio = models.TextField(blank=True)
-    age = models.PositiveIntegerField(null=True, blank=True)
-    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True)
-    height = models.FloatField(null=True, blank=True) # in cm
-    weight = models.FloatField(null=True, blank=True) # in kg
-    
-    # Fitness Info
-    goal = models.CharField(max_length=50, blank=True)
-    fitness_level = models.CharField(max_length=50, blank=True)
-    
-    # Gamification / Stats
-    workouts_completed = models.IntegerField(default=0)
-    calories_burned = models.IntegerField(default=0)
-    current_streak = models.IntegerField(default=0)
-    achievements_count = models.IntegerField(default=0)
+    def set_password(self, raw_password):
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(raw_password.encode('utf-8'), salt)
+        self.password = hashed.decode('utf-8')
 
-    def __str__(self):
-        return f"{self.user.username} Profile"
+    def check_password(self, raw_password):
+        return bcrypt.checkpw(raw_password.encode('utf-8'), self.password.encode('utf-8'))
+
+    @property
+    def is_authenticated(self):
+        return True
+
+class User(FitMitraUser):
+    meta = {'collection': 'users'}
+    username = StringField(required=True, unique=True)
+    
+    # Profile stats
+    goal = StringField()
+    age = IntField()
+    gender = StringField()
+    fitness_level = StringField(default='Beginner')
+
+class GymOwner(FitMitraUser):
+    meta = {'collection': 'gym_owners'}
+    gym_name = StringField(required=True)
+    gym_address = StringField()
+
+    # Subscription & Dashboard Logic
+    plan_type = StringField(default='FREE', choices=('FREE', 'PRO')) 
+    plan_expiry = DateTimeField()
+    is_pro_active = BooleanField(default=False)
+    
+    # Simulation Data
+    monthly_fee_per_member = FloatField(default=500.0) # Simulation base
+    current_profit = FloatField(default=0.0) 
+    
+    # Operational Limits
+    max_members_limit = IntField(default=25) # 25 for FREE, 1000 for PRO
+    current_member_count = IntField(default=0)
+    
+    dashboard_status = StringField(default='ACTIVE')
+
+    def update_plan(self, plan_name):
+        self.plan_type = plan_name
+        self.is_pro_active = (plan_name == 'PRO')
+        if plan_name == 'PRO':
+            self.max_members_limit = 1000
+        else:
+            self.max_members_limit = 25
+        self.save()
+
+    def calculate_simulation(self):
+        """
+        Calculates potential profit based on member count and fee
+        """
+        return self.current_member_count * self.monthly_fee_per_member

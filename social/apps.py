@@ -7,8 +7,4 @@ class SocialConfig(AppConfig):
     verbose_name = 'Social & Community'
     
     def ready(self):
-        """Import signals when app is ready"""
-        try:
-            import social.signals  # noqa
-        except ImportError:
-            pass
+        pass

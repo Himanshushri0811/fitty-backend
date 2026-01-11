@@ -1,34 +1,34 @@
-from django.db import models
-from django.contrib.auth.models import User
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, ReferenceField, DecimalField, DateField
+from datetime import datetime
+from accounts.models import GymOwner
 
-class GymOwnerProfile(models.Model):
-    PLAN_CHOICES = (
-        ('FREE', 'Free'),
-        ('STARTER', 'Starter'),
-        ('PRO', 'Pro'),
-    )
+class PaymentHistory(Document):
+    """
+    Immutable log of all payments in MongoDB
+    """
+    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=4) # CASCADE
+    order_id = StringField(required=True)
+    payment_id = StringField()
+    amount = DecimalField(precision=2)
+    currency = StringField(default='INR')
+    status = StringField(default='created') # created, success, failed
+    plan_type = StringField()
+    created_at = DateTimeField(default=datetime.utcnow)
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='gym_profile')
-    gym_name = models.CharField(max_length=255)
-    payment_status = models.BooleanField(default=False) # Deprecated, use plan_type
-    plan_type = models.CharField(max_length=20, choices=PLAN_CHOICES, default='FREE')
-    created_at = models.DateTimeField(auto_now_add=True)
+    meta = {'collection': 'payment_history'}
+
+class Member(Document):
+    """
+    Gym Members in MongoDB
+    """
+    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=4)
+    name = StringField(required=True)
+    mobile = StringField(required=True)
+    join_date = DateField(default=datetime.utcnow().date)
+    fees_status = StringField(default='PENDING', choices=('PAID', 'PENDING'))
+    fees_due_date = DateField()
+
+    meta = {'collection': 'gym_members'}
 
     def __str__(self):
-        return f"{self.gym_name} ({self.user.username}) - {self.plan_type}"
-
-class Member(models.Model):
-    FEES_STATUS_CHOICES = (
-        ('PAID', 'Paid'),
-        ('PENDING', 'Pending'),
-    )
-
-    gym_owner = models.ForeignKey(GymOwnerProfile, on_delete=models.CASCADE, related_name='members')
-    name = models.CharField(max_length=255)
-    mobile = models.CharField(max_length=15)
-    join_date = models.DateField()
-    fees_status = models.CharField(max_length=10, choices=FEES_STATUS_CHOICES, default='PENDING')
-    fees_due_date = models.DateField()
-
-    def __str__(self):
-        return f"{self.name} - {self.gym_owner.gym_name}"
+        return f"{self.name} ({self.gym_owner.gym_name if self.gym_owner else 'No Gym'})"

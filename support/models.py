@@ -1,11 +1,11 @@
-from django.db import models
+from mongoengine import Document, StringField, DateTimeField, EmailField
+from datetime import datetime
 
-class ContactMessage(models.Model):
-    name = models.CharField(max_length=255)
-    email = models.EmailField()
-    subject = models.CharField(max_length=255, blank=True, null=True)
-    message = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
+class ContactMessage(Document):
+    name = StringField(required=True)
+    email = EmailField(required=True)
+    subject = StringField()
+    message = StringField(required=True)
+    created_at = DateTimeField(default=datetime.utcnow)
 
-    def __str__(self):
-        return f"Message from {self.name} ({self.email})"
+    meta = {'collection': 'support_messages'}

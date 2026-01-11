@@ -1,3 +1,1 @@
-from django.db import models
-
-# Create your models here.
+# No SQL Models for Common app in Pure Mongo Mode
