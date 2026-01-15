@@ -10,7 +10,8 @@ class MongoJWTAuthentication(authentication.BaseAuthentication):
     Custom JWT Auth using MongoEngine Users
     """
     def authenticate(self, request):
-        auth_header = request.headers.get('Authorization')
+        # Support both standard styles
+        auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION')
         if not auth_header:
             return None
 
@@ -19,7 +20,12 @@ class MongoJWTAuthentication(authentication.BaseAuthentication):
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
         except jwt.ExpiredSignatureError:
             raise exceptions.AuthenticationFailed('Token expired')
-        except (IndexError, jwt.DecodeError):
+        except jwt.InvalidSignatureError:
+            # Important: Log this to see if keys mismatch
+            print(f"DEBUG: JWT Signature verification failed. Key used: {settings.SECRET_KEY[:5]}...")
+            raise exceptions.AuthenticationFailed('Invalid token signature')
+        except (IndexError, jwt.DecodeError) as e:
+            print(f"DEBUG: JWT Decode Error: {e}")
             raise exceptions.AuthenticationFailed('Invalid token')
 
         user_id = payload.get('user_id')

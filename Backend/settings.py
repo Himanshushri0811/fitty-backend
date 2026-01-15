@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 from datetime import timedelta
-from mongo import connect_db
 
 # --------------------------------------------------
 # BASE & BOOTSTRAP
@@ -12,15 +11,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-# --------------------------------------------------
-# DATABASE INITIALIZATION (FIRST!)
-# --------------------------------------------------
-connect_db()
+# Production Security & Proxy Configuration (Render)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+SECURE_SSL_REDIRECT = False  # Render handles SSL termination
 
 # --------------------------------------------------
 # CORE CONFIG
 # --------------------------------------------------
-ALLOWED_HOSTS = ["*"]
+# --------------------------------------------------
+# CORE CONFIG
+# --------------------------------------------------
+ALLOWED_HOSTS = ["*"] # Allow all for Render dynamic IPs/Domains
 
 INSTALLED_APPS = [
     # Minimal Django services
@@ -33,6 +35,7 @@ INSTALLED_APPS = [
     "corsheaders",
     
     # Local Apps
+    "common",  # Core app first for database init
     "accounts",
     "gym_management",
     "ai",
@@ -41,7 +44,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware", # CORS FIRST
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -60,19 +63,63 @@ DATABASES = {
 }
 
 # --------------------------------------------------
+# MONGOENGINE CONNECTION (Production-Grade)
+# --------------------------------------------------
+import mongoengine
+import sys
+
+_MONGO_URI = os.getenv("MONGO_URI")
+
+if not _MONGO_URI:
+    # Fail hard if DB is not configured
+    print("❌ CRITICAL: MONGO_URI is missing from environment variables.")
+    if os.getenv("DJANGO_ENV") == "production":
+        sys.exit(1)
+elif "test" not in sys.argv: # Avoid connecting during test runner setup if separate
+    try:
+        mongoengine.connect(
+            host=_MONGO_URI, 
+            alias='default', 
+            uuidRepresentation='standard'
+        )
+        print("✅ MongoEngine: Registered default connection.")
+    except Exception as e:
+        print(f"❌ MongoEngine Connection Error: {e}")
+        # In production, we can't run without DB
+        if not DEBUG:
+            sys.exit(1)
+
+# --------------------------------------------------
 # AUTHENTICATION & SECURITY
 # --------------------------------------------------
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "accounts.authentication.MongoJWTAuthentication",
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'accounts.authentication.MongoJWTAuthentication',
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.AllowAny",
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.AllowAny', # Default open, secure specific views
     ),
 }
 
-CORS_ALLOW_ALL_ORIGINS = True # In production change to specific origins
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "https://fitmitra.onrender.com").split(",")
+    CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://fitmitra.onrender.com").split(",")
 
 # --------------------------------------------------
 # URLS & WSGI
