@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import User, GymOwner
 from .authentication import generate_jwt
-import razorpay
+# import razorpay (Moved to inside method to prevent pkg_resources startup crash)
 from django.conf import settings
 from datetime import datetime
 import mongoengine
@@ -137,6 +137,7 @@ class VerifyPaymentAPIView(APIView):
         razorpay_signature = request.data.get('razorpay_signature')
         
         try:
+            import razorpay
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             client.utility.verify_payment_signature({
                 'razorpay_order_id': razorpay_order_id,
