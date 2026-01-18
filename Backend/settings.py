@@ -162,3 +162,20 @@ USE_TZ = True
 # Payment Integration (Razorpay)
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+
+# --------------------------------------------------
+# EMAIL CONFIGURATION (SMTP)
+# --------------------------------------------------
+
+# STRICTLY use SMTP by default.
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False  # Explicitly False for port 587
+
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "FitMitra Support <fitmitra11@gmail.com>")
+
+print(f"✅ EMAIL SYSTEM: Using SMTP EmailBackend for {EMAIL_HOST_USER} (TLS=True)")

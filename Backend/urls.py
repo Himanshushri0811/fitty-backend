@@ -8,7 +8,7 @@ urlpatterns = [
     path("api/ai/", include("ai.urls")),
     path("api/explore/", include("explore.urls")),
     # path("api/admin-panel/", include("admin_panel.urls")),
-    # path('api/support/', include('support.urls')),
+    path('api/support/', include('support.urls')),
     path('api/social/', include('social.urls')),
     path('api/gym/', include('gym_management.urls')),
 ]
