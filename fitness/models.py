@@ -1,5 +1,6 @@
-from mongoengine import Document, StringField, ReferenceField, IntField, CASCADE
+from mongoengine import Document, StringField, ReferenceField, IntField, CASCADE, EmbeddedDocument, EmbeddedDocumentField, MapField, ListField
 from accounts.models import User
+
 
 class Goal(Document):
     user = ReferenceField(User, reverse_delete_rule=CASCADE)
@@ -32,3 +33,36 @@ class DayExercise(Document):
     order = IntField()
 
     meta = {'collection': 'workout_day_exercises'}
+
+class DailyIntake(EmbeddedDocument):
+    glasses = IntField(default=0)
+    total_ml = IntField(default=0)
+    last_drink_at = StringField()
+
+class WaterIntake(Document):
+    user = ReferenceField(User, reverse_delete_rule=CASCADE, unique=True)
+    records = MapField(EmbeddedDocumentField(DailyIntake))  # Key: "YYYY-MM-DD"
+    
+    meta = {'collection': 'water_intake'}
+
+class PlanItem(EmbeddedDocument):
+    id = StringField() # generated uuid
+    time = StringField()
+    title = StringField()
+    type = StringField(choices=('workout', 'yoga', 'diet', 'recovery', 'other'))
+    status = StringField(default='pending', choices=('pending', 'completed'))
+    coach_note = StringField()
+
+class DailyPlan(Document):
+    user = ReferenceField(User, reverse_delete_rule=CASCADE)
+    date = StringField(required=True) # YYYY-MM-DD
+    items = ListField(EmbeddedDocumentField(PlanItem))
+    coach_message = StringField()
+    
+    meta = {
+        'collection': 'daily_plans',
+        'indexes': [
+            {'fields': ['user', 'date'], 'unique': True}
+        ]
+    }
+

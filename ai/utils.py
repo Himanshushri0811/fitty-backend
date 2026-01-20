@@ -1,7 +1,24 @@
-# D:\demo_project\FITMITRA\backend\ai\utils.py
-"""
-Utility functions for AI module
-"""
+
+import google.generativeai as genai
+from django.conf import settings
+import os
+
+def get_gemini_response(prompt):
+    """
+    Get response from Gemini Flash model
+    """
+    try:
+        api_key = getattr(settings, 'GEMINI_API_KEY', os.getenv('GEMINI_API_KEY'))
+        if not api_key:
+            return "AI Configuration Missing (API Key)"
+            
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return "I am currently unable to connect to the AI brain. However, this workout is scientifically structured for your goals."
 
 def detect_query_intent(query):
     """

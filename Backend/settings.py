@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
-DEBUG = os.getenv("DEBUG", "False") == "True"
+DEBUG = os.getenv("DEBUG", "True") == "True" # Default to True for dev convenience
 
 # Production Security & Proxy Configuration (Render)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -75,19 +75,21 @@ if not _MONGO_URI:
     print("❌ CRITICAL: MONGO_URI is missing from environment variables.")
     if os.getenv("DJANGO_ENV") == "production":
         sys.exit(1)
-elif "test" not in sys.argv: # Avoid connecting during test runner setup if separate
-    try:
-        mongoengine.connect(
-            host=_MONGO_URI, 
-            alias='default', 
-            uuidRepresentation='standard'
-        )
-        print("✅ MongoEngine: Registered default connection.")
-    except Exception as e:
-        print(f"❌ MongoEngine Connection Error: {e}")
-        # In production, we can't run without DB
-        if not DEBUG:
-            sys.exit(1)
+if "test" not in sys.argv: # Avoid connecting during test runner setup if separate
+    # Only connect in the main process to avoid double connection during autoreload
+    if os.environ.get('RUN_MAIN') == 'true' or not os.environ.get('RUN_MAIN'):
+        try:
+            mongoengine.connect(
+                host=_MONGO_URI, 
+                alias='default', 
+                uuidRepresentation='standard'
+            )
+            print("✅ MongoEngine: Registered default connection.")
+        except Exception as e:
+            print(f"❌ MongoEngine Connection Error: {e}")
+            # In production, we can't run without DB
+            if not DEBUG:
+                sys.exit(1)
 
 # --------------------------------------------------
 # AUTHENTICATION & SECURITY
