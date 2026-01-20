@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField
 from datetime import datetime
 import bcrypt
 
@@ -31,6 +31,26 @@ class FitMitraUser(Document):
     def is_authenticated(self):
         return True
 
+class WorkoutExercise(EmbeddedDocument):
+    name = StringField(required=True)
+    sets = StringField()
+    reps = StringField()
+    description = StringField()
+    video_url = StringField(default="") # Link to user's uploaded video
+
+class WorkoutDay(EmbeddedDocument):
+    day_name = StringField(required=True) # Monday, Tuesday, etc.
+    focus = StringField(required=True)
+    exercises = EmbeddedDocumentListField(WorkoutExercise)
+
+class WorkoutFeedback(EmbeddedDocument):
+    date = DateTimeField(default=datetime.utcnow)
+    workout_day_index = IntField() # 0-6
+    difficulty = StringField(choices=('Easy', 'Medium', 'Hard'))
+    fatigue_level = IntField(min_value=1, max_value=10)
+    form_quality = StringField(choices=('Good', 'Needs Improvement', 'Poor'))
+
+
 class User(FitMitraUser):
     meta = {'collection': 'users'}
     username = StringField(required=True, unique=True)
@@ -40,6 +60,11 @@ class User(FitMitraUser):
     age = IntField()
     gender = StringField()
     fitness_level = StringField(default='Beginner')
+    
+    # Workout Schedule & History
+    weekly_plan = EmbeddedDocumentListField(WorkoutDay)
+    workout_history = EmbeddedDocumentListField(WorkoutFeedback)
+
 
 class GymOwner(FitMitraUser):
     meta = {'collection': 'gym_owners'}

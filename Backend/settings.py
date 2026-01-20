@@ -10,12 +10,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
-DEBUG = os.getenv("DEBUG", "False") == "True"
+DEBUG = os.getenv("DEBUG", "True") == "True" # Default to True for dev convenience
 
 # --------------------------------------------------
 # DATABASE INITIALIZATION (FIRST!)
 # --------------------------------------------------
-connect_db()
+# Only connect in the main process to avoid double connection during autoreload
+if os.environ.get('RUN_MAIN') == 'true' or not os.environ.get('RUN_MAIN'):
+   # Simple check to avoid double printing/connecting if possible
+   connect_db()
 
 # --------------------------------------------------
 # CORE CONFIG
