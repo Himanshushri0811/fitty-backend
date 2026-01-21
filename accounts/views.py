@@ -73,7 +73,14 @@ class SignupAPIView(APIView):
 
             tokens = generate_jwt(user)
             return Response({
-                'user': {'email': user.email, 'role': user.role, 'id': str(user.id)},
+                'user': {
+                    'email': user.email, 
+                    'role': user.role, 
+                    'id': str(user.id),
+                    'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                    'gym_name': getattr(user, 'gym_name', None),
+                    'plan': getattr(user, 'plan_type', 'FREE')
+                },
                 'access': tokens['access'],
                 'refresh': tokens['refresh']
             }, status=201)
@@ -105,6 +112,7 @@ class LoginAPIView(APIView):
                 'role': user.role,
                 'id': str(user.id),
                 'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                'gym_name': getattr(user, 'gym_name', None),
                 'plan': getattr(user, 'plan_type', 'FREE')
             },
             'access': tokens['access'],
