@@ -24,9 +24,18 @@ class Member(Document):
     gym_owner = ReferenceField(GymOwner, reverse_delete_rule=4)
     name = StringField(required=True)
     mobile = StringField(required=True)
+    email = StringField()
+    gender = StringField(choices=('Male', 'Female', 'Other'))
+    dob = DateField()
+    
+    # Membership Details
     join_date = DateField(default=datetime.utcnow().date)
-    fees_status = StringField(default='PENDING', choices=('PAID', 'PENDING'))
+    plan_name = StringField(default="Monthly") # e.g. "3 Months Strength"
+    amount_paid = DecimalField(precision=2, default=0.0)
+    
+    fees_status = StringField(default='PENDING', choices=('PAID', 'PENDING', 'OVERDUE'))
     fees_due_date = DateField()
+    notes = StringField()
 
     meta = {'collection': 'gym_members'}
 

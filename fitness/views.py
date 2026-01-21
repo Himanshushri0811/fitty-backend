@@ -19,6 +19,9 @@ class WaterIntakeView(APIView):
 
     def get(self, request):
         user = request.user
+        if user.role != 'USER':
+             return Response({"error": "This feature is for Users only"}, status=403)
+
         try:
             water_intake = WaterIntake.objects.get(user=user)
         except WaterIntake.DoesNotExist:
@@ -43,6 +46,9 @@ class WaterIntakeView(APIView):
         Optional payload: {"amount_ml": 250} (defaults to 250)
         """
         user = request.user
+        if user.role != 'USER':
+             return Response({"error": "This feature is for Users only"}, status=403)
+
         amount_ml = request.data.get('amount_ml', 250)
         
         try:

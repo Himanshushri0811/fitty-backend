@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField, DateField
 from datetime import datetime
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
@@ -76,7 +76,15 @@ class GymOwner(FitMitraUser):
     plan_type = StringField(default='FREE', choices=('FREE', 'PRO')) 
     plan_expiry = DateTimeField()
     is_pro_active = BooleanField(default=False)
+    subscription_status = StringField(default='ACTIVE', choices=('ACTIVE', 'PAST_DUE', 'CANCELLED'))
     
+    # Branding
+    branding_logo = StringField(default="")
+
+    # Assistant Usage Tracking
+    assistant_daily_usage = IntField(default=0)
+    last_assistant_usage_date = DateField()
+
     # Simulation Data
     monthly_fee_per_member = FloatField(default=500.0) # Simulation base
     current_profit = FloatField(default=0.0) 
