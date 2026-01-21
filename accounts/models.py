@@ -1,6 +1,6 @@
 from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField
 from datetime import datetime
-import bcrypt
+from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
 class FitMitraUser(Document):
     """
@@ -23,12 +23,10 @@ class FitMitraUser(Document):
     cover_pic = StringField(default="") # URL/Path to cover picture
 
     def set_password(self, raw_password):
-        salt = bcrypt.gensalt()
-        hashed = bcrypt.hashpw(raw_password.encode('utf-8'), salt)
-        self.password = hashed.decode('utf-8')
+        self.password = make_password(raw_password)
 
     def check_password(self, raw_password):
-        return bcrypt.checkpw(raw_password.encode('utf-8'), self.password.encode('utf-8'))
+        return django_check_password(raw_password, self.password)
 
     @property
     def is_authenticated(self):

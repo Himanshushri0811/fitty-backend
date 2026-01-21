@@ -4,6 +4,7 @@ from .views import (
     LoginAPIView, 
     ProfileView, 
     VerifyPaymentAPIView, 
+    HealthCheckView, 
     UserWorkoutPlanAPI, 
     WorkoutFeedbackAPI, 
     WorkoutExplanationAPI, 
@@ -11,6 +12,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path('health/', HealthCheckView.as_view(), name='health-check'),
     path('signup/', SignupAPIView.as_view(), name='signup'),
     path('signup/gym-owner/', SignupAPIView.as_view(), name='gym-owner-signup'),
     path('login/', LoginAPIView.as_view(), name='login'),
