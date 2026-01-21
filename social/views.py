@@ -36,3 +36,27 @@ class SocialProfileView(APIView):
         if not profile:
              return Response({"error": "Profile not found"}, status=404)
         return Response(SocialProfileSerializer(profile).data)
+
+class MyProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = SocialProfile.objects(user=request.user).first()
+        if not profile:
+            # Create default profile if missing
+            # Ensure unique username by falling back to user.username
+            # or generated simplified username
+            username = request.user.username
+            
+            # Check if this username is already taken by another social profile
+            if SocialProfile.objects(username=username).first():
+                 username = f"{username}_{str(request.user.id)[:4]}"
+
+            profile = SocialProfile(
+                user=request.user,
+                username=username,
+                fitness_goal=getattr(request.user, 'goal', 'Get Fit')
+            )
+            profile.save()
+        
+        return Response(SocialProfileSerializer(profile).data)

@@ -54,7 +54,7 @@ def generate_jwt(user):
     access_payload = {
         'user_id': str(user.id),
         'role': role,
-        'exp': datetime.utcnow() + timedelta(days=1),
+        'exp': datetime.utcnow() + timedelta(days=30),
         'iat': datetime.utcnow()
     }
     

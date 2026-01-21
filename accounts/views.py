@@ -26,6 +26,7 @@ class SignupAPIView(APIView):
         data = request.data
         email = data.get('email', '').strip().lower()
         password = data.get('password')
+        name = data.get('name', '').strip()
         
         # Determine role: Use explicit role or detect via gym_name presence
         role = data.get('role')
@@ -45,7 +46,8 @@ class SignupAPIView(APIView):
                 email=email, 
                 gym_name=data.get('gym_name', 'My Gym'), 
                 role='GYM_OWNER',
-                gym_address=data.get('gym_address', '')
+                gym_address=data.get('gym_address', ''),
+                name=name
             )
         else:
             username = data.get('username', email.split('@')[0])
@@ -57,7 +59,8 @@ class SignupAPIView(APIView):
                 role='USER',
                 goal=data.get('goal', ''),
                 age=int(data.get('age')) if data.get('age') else None,
-                gender=data.get('gender', '')
+                gender=data.get('gender', ''),
+                name=name
             )
 
         user.set_password(password)
@@ -92,7 +95,7 @@ class LoginAPIView(APIView):
                 'email': user.email,
                 'role': user.role,
                 'id': str(user.id),
-                'name': getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
                 'plan': getattr(user, 'plan_type', 'FREE')
             },
             'access': tokens['access'],
@@ -104,13 +107,96 @@ class ProfileView(APIView):
         user = request.user
         if not user:
             return Response({'error': 'Unauthorized'}, status=401)
-        return Response({
+        
+        # Build profile data
+        profile_data = {
+            'id': str(user.id),
             'email': user.email,
             'role': user.role,
-            'id': str(user.id),
-            'name': getattr(user, 'gym_name', getattr(user, 'username', 'User')),
-            'plan': getattr(user, 'plan_type', 'FREE')
-        })
+            'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+            'username': getattr(user, 'username', ''),
+            'profile_pic': getattr(user, 'profile_pic', ''),
+            'cover_pic': getattr(user, 'cover_pic', ''),
+            'plan': getattr(user, 'plan_type', 'FREE'),
+            'bio': getattr(user, 'bio', ''), # Ensure model has this or decide to add it, user might have mixed it with User model fields
+            # Add User specific fields
+            'age': getattr(user, 'age', None),
+            'gender': getattr(user, 'gender', ''),
+            'height': getattr(user, 'height', None),
+            'weight': getattr(user, 'weight', None),
+            'goal': getattr(user, 'goal', ''),
+            'fitness_level': getattr(user, 'fitness_level', 'Beginner'),
+            'workouts_completed': getattr(user, 'workouts_completed', 0) if hasattr(user, 'workouts_completed') else 0,
+            # For GymOwner specific
+            'gym_name': getattr(user, 'gym_name', ''),
+            'gym_address': getattr(user, 'gym_address', '')
+        }
+        
+        return Response(profile_data)
+
+    def put(self, request):
+        user = request.user
+        if not user:
+            return Response({'error': 'Unauthorized'}, status=401)
+
+        data = request.data
+        
+        # Update allowed fields
+        editable_fields = ['name', 'age', 'gender', 'height', 'weight', 'goal', 'fitness_level', 'bio', 'gym_address']
+        
+        for field in editable_fields:
+            if field in data:
+                # Basic validation or casting could go here
+                val = data[field]
+                if field in ['age', 'height', 'weight'] and val == "":
+                    val = None
+                setattr(user, field, val)
+        
+        user.save()
+        return self.get(request) # Return updated profile
+
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+
+class UploadProfilePicView(APIView):
+    def post(self, request):
+        user = request.user
+        if not user:
+             return Response({'error': 'Unauthorized'}, status=401)
+        
+        file_obj = request.FILES.get('profile_pic') or request.FILES.get('cover_pic')
+        is_cover = 'cover_pic' in request.FILES
+        
+        if not file_obj:
+            return Response({'error': 'No file uploaded'}, status=400)
+        
+        # Basic validation (size, type)
+        if file_obj.size > 5 * 1024 * 1024:
+             return Response({'error': 'File too large (max 5MB)'}, status=400)
+             
+        try:
+            # Generate unique filename
+            ext = file_obj.name.split('.')[-1]
+            filename = f"users/{user.id}/{'cover' if is_cover else 'avatar'}_{int(datetime.now().timestamp())}.{ext}"
+            
+            # Save file
+            path = default_storage.save(filename, ContentFile(file_obj.read()))
+            file_url = settings.MEDIA_URL + path
+            
+            # Update user model
+            if is_cover:
+                user.cover_pic = file_url
+            else:
+                user.profile_pic = file_url
+            user.save()
+            
+            return Response({
+                'status': 'success', 
+                'profile_pic': user.profile_pic,
+                'cover_pic': user.cover_pic
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
 
 class VerifyPaymentAPIView(APIView):
     def post(self, request):
