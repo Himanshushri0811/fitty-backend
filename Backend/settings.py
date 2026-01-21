@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "ai",
     "explore",
     "social",
+    "diet",
 ]
 
 MIDDLEWARE = [

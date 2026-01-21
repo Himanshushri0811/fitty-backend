@@ -18,6 +18,9 @@ class FitMitraUser(Document):
     is_active = BooleanField(default=True)
     created_at = DateTimeField(default=datetime.utcnow)
     role = StringField(required=True) # USER, GYM_OWNER
+    name = StringField() # Full Name for User, Owner Name for GymOwner
+    profile_pic = StringField(default="") # URL/Path to profile picture
+    cover_pic = StringField(default="") # URL/Path to cover picture
 
     def set_password(self, raw_password):
         self.password = make_password(raw_password)
