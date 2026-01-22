@@ -97,9 +97,17 @@ class LoginAPIView(APIView):
         if not identifier or not password:
             return Response({'error': 'Credentials required'}, status=400)
 
-        user = (GymOwner.objects(email=identifier).first() or 
-                User.objects(email=identifier).first() or 
-                User.objects(username=identifier).first())
+        # Try to find user in both collections
+        user = None
+        
+        # 1. Check GymOwner (Login by Email usually)
+        user = GymOwner.objects(email=identifier).first()
+        
+        # 2. Check User (Login by Email or Username)
+        if not user:
+            user = User.objects(email=identifier).first()
+        if not user:
+            user = User.objects(username=identifier).first()
 
         if not user or not user.check_password(password):
             return Response({'error': 'Invalid Credentials'}, status=401)

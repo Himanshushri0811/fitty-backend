@@ -44,9 +44,16 @@ class MyProfileView(APIView):
         profile = SocialProfile.objects(user=request.user).first()
         if not profile:
             # Create default profile if missing
-            # Ensure unique username by falling back to user.username
-            # or generated simplified username
-            username = request.user.username
+            # Ensure unique username by falling back to user.username (if exists) or name/email
+            # GymOwner might not have username
+            username = getattr(request.user, 'username', None)
+            if not username:
+                if hasattr(request.user, 'email'):
+                    username = request.user.email.split('@')[0]
+                elif hasattr(request.user, 'name'):
+                    username = request.user.name.replace(" ", "_").lower()
+                else:
+                    username = f"user_{str(request.user.id)[:8]}"
             
             # Check if this username is already taken by another social profile
             if SocialProfile.objects(username=username).first():
