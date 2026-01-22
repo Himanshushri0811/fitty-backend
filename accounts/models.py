@@ -66,6 +66,10 @@ class User(FitMitraUser):
     weekly_plan = EmbeddedDocumentListField(WorkoutDay)
     workout_history = EmbeddedDocumentListField(WorkoutFeedback)
 
+    # Assistant Usage Tracking
+    assistant_daily_usage = IntField(default=0)
+    last_assistant_usage_date = DateField()
+
 
 class GymOwner(FitMitraUser):
     meta = {'collection': 'gym_owners'}

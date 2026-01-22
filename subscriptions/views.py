@@ -20,6 +20,14 @@ class CreateSubscriptionOrderView(APIView):
         if request.user.role != 'GYM_OWNER':
             return Response({"error": "Only Gym Owners can subscribe"}, status=403)
 
+        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+            print("❌ Razorpay Keys Error: Keys are missing in settings.")
+            return Response({"error": "Payment Gateway Configuration Missing"}, status=500)
+
+        if "YOUR_RAZORPAY" in settings.RAZORPAY_KEY_ID:
+             print("❌ Razorpay Keys Error: Placeholder values detected.")
+             return Response({"error": "Payment Gateway keys not configured"}, status=500)
+
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
         
         # PRO Plan is fixed at 299 INR for now

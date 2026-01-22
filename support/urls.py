@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import ContactUsView
+from .views import ContactMessageView, PublicLiveChatView, AgentLiveChatView
 
 urlpatterns = [
-    path('contact/', ContactUsView.as_view(), name='contact_us'),
+    path('contact/', ContactMessageView.as_view(), name='contact_message'),
 ]
