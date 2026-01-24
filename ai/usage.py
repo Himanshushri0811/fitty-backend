@@ -1,7 +1,8 @@
 from datetime import datetime
 from accounts.models import User, GymOwner
 
-MAX_FREE_DAILY_MESSAGES = 10
+# Dev Mode: 1000, Prod Free: 20
+MAX_FREE_DAILY_MESSAGES = 1000 # Increased for Development as requested
 
 def check_and_increment_quota(user):
     """

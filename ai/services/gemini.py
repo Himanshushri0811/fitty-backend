@@ -19,7 +19,7 @@ if not api_key:
 if api_key:
     genai.configure(api_key=api_key)
 
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 def generate_chat_response(session, user_message, user):
     """

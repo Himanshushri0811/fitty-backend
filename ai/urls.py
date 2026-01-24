@@ -3,5 +3,6 @@ from . import views
 
 urlpatterns = [
     path("chat/", views.AIChatAPIView.as_view(), name="chat_with_fitty"),
+    path("sessions/", views.AISessionListAPIView.as_view(), name="chat_sessions"),
     path("posture-analysis/", views.PostureAnalysisAPIView.as_view(), name="posture_analysis"),
 ]
