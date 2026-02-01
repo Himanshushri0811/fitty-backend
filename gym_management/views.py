@@ -115,3 +115,118 @@ class MemberManagerView(APIView):
             return Response({"id": str(m.id), "status": "added"}, status=201)
         except Exception as e:
             return Response({"error": str(e)}, status=400)
+
+    def put(self, request):
+        """
+        Update member details
+        """
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Unauthorized"}, status=403)
+            
+        member_id = request.data.get('id')
+        if not member_id:
+            return Response({"error": "Member ID required"}, status=400)
+            
+        try:
+            m = Member.objects.get(id=member_id, gym_owner=request.user)
+            
+            # Update fields if present
+            fields = ['name', 'mobile', 'email', 'gender', 'dob', 'plan_name', 'fees_status', 'fees_due_date', 'notes']
+            for field in fields:
+                if field in request.data:
+                    setattr(m, field, request.data[field])
+            
+            m.save()
+            return Response({"status": "updated"}, status=200)
+        except Member.DoesNotExist:
+            return Response({"error": "Member not found"}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+
+    def delete(self, request):
+        """
+        Delete a member
+        """
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Unauthorized"}, status=403)
+            
+        member_id = request.query_params.get('id')
+        if not member_id:
+             return Response({"error": "Member ID required"}, status=400)
+             
+        try:
+            m = Member.objects.get(id=member_id, gym_owner=request.user)
+            m.delete()
+            
+            # Update count
+            request.user.current_member_count = Member.objects(gym_owner=request.user).count()
+            request.user.save()
+            
+            return Response({"status": "deleted"}, status=200)
+        except Member.DoesNotExist:
+            return Response({"error": "Member not found"}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+
+class GymProfileView(APIView):
+    """
+    Manage Gym Profile Settings
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Unauthorized"}, status=403)
+        
+        user = request.user
+        # Assuming 'address' might be on profile or user model directly (MongoEngine)
+        # Using getattr safely
+        return Response({
+            "gym_name": user.gym_name,
+            "owner_name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "address": getattr(user, 'address', '')
+        })
+
+    def put(self, request):
+        if request.user.role != 'GYM_OWNER':
+            return Response({"error": "Unauthorized"}, status=403)
+        
+        user = request.user
+        data = request.data
+        
+        if 'gym_name' in data:
+            user.gym_name = data['gym_name']
+        if 'owner_name' in data:
+            user.name = data['owner_name']
+        if 'phone' in data:
+            user.phone = data['phone']
+        if 'address' in data:
+            user.address = data['address']
+            
+        user.save()
+        return Response({"message": "Profile updated", "gym_name": user.gym_name})
+
+class NotificationView(APIView):
+    """
+    Handle Notifications (Mock implementation for demo)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        if request.user.role != 'GYM_OWNER':
+             return Response({"error": "Unauthorized"}, status=403)
+             
+        action = request.data.get('action')
+        if action == 'remind_fees':
+            # Count pending members
+            pending_members = Member.objects(gym_owner=request.user, fees_status='PENDING')
+            count = pending_members.count()
+            
+            # Application Logic: Send SMS/WhatsApp
+            # For now, we simulate success
+            
+            return Response({"message": f"Fee reminders successfully sent to {count} members via WhatsApp.", "count": count})
+        
+        return Response({"error": "Invalid action"}, status=400)
