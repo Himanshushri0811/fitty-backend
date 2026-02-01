@@ -7,7 +7,8 @@ from .views import (
     SeedFoodView,
     DietCarouselView,
     DietFoodDetailView,
-    CalculateMacrosView
+    CalculateMacrosView,
+    LogFoodView
 )
 
 urlpatterns = [
@@ -21,4 +22,5 @@ urlpatterns = [
     path('carousel/', DietCarouselView.as_view(), name='diet-carousel'),
     path('foods/<str:id>/', DietFoodDetailView.as_view(), name='diet-food-detail'),
     path('calculate-macros/', CalculateMacrosView.as_view(), name='calculate-macros'),
+    path('log-food/', LogFoodView.as_view(), name='log-food'),
 ]
