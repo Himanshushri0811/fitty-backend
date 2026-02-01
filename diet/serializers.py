@@ -64,7 +64,15 @@ class MealItemSerializer(serializers.Serializer):
     food_name = serializers.SerializerMethodField()
     custom_name = serializers.CharField(required=False)
     quantity = serializers.FloatField(default=1.0)
-    calories = serializers.IntegerField(source='calories_snapshot', read_only=True)
+    
+    # Calories: Use Snapshot if available, else fetch from Food Item
+    calories = serializers.SerializerMethodField()
+    def get_calories(self, obj):
+        if obj.calories_snapshot:
+            return obj.calories_snapshot
+        # Fallback
+        item = self.get_food_item(obj)
+        return item.calories if item else 0
     
     # Nutritional Info (Fetched from FoodItem)
     protein = serializers.SerializerMethodField()

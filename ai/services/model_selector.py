@@ -25,7 +25,7 @@ def get_best_gemini_model():
         return _working_model
 
     # Configure API
-    api_key = os.getenv("GEMINI_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
     if not api_key:
         print("❌ No API Key found for Model Selection.")
         return "gemini-2.0-flash" # Default fallback

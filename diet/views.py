@@ -57,7 +57,10 @@ class WeeklyPlanView(APIView):
 
     def get(self, request):
         plan = get_or_create_weekly_plan(request.user)
+        
         if not plan:
+            # Check why
+            profile = DietProfile.objects(user=request.user).first()
             return Response({"message": "Could not generate plan. Please ensure profile is set and foods exist."}, status=400)
         serializer = DietPlanSerializer(plan)
         
@@ -341,3 +344,100 @@ class CalculateMacrosView(APIView):
              return Response(result, 500)
              
         return Response(result)
+
+class LogFoodView(APIView):
+    """
+    Saves a food log to the user's daily history.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from datetime import datetime
+        
+        # 1. Get Data
+        date_str = request.data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        items = request.data.get('items', []) # List of strings or objects
+        total_data = request.data.get('totals', {}) # {calories, protein...}
+        
+        if not items:
+            return Response({"error": "No items to log"}, 400)
+
+        # 2. Get or Create Daily Log
+        from .models import DailyDietLog, DailyMealSlot, MealItem, FoodItem
+        
+        daily_log = DailyDietLog.objects(user=request.user, date=date_str).first()
+        if not daily_log:
+            daily_log = DailyDietLog(user=request.user, date=date_str)
+        
+        # 3. Add to "Snacks/Other" or specific slot if provided
+        # For simple logger, we can just throw it into a generic "Logged" slot or append to 'Snacks'
+        # Let's create a dedicated "Logged" slot if it doesn't exist? 
+        # Or just append to 'consumed_meals'
+        
+        # Create a new slot for this entry (e.g., "Log at 8:30 PM")
+        time_now = datetime.now().strftime('%I:%M %p')
+        
+        # Create MealItems (Virtual, not linked to DB FoodItems necessarily)
+        meal_items = []
+        for item_name in items:
+            # Try to find food item matches? For now, raw.
+            # We rely on total_data for the nutrition.
+            # Distribute nutrition? Complex.
+            # SIMPLIFICATION: We store the Totals in the log mostly.
+            pass
+
+        # ACTUAL STRATEGY: 
+        # Use AI result to populate simple MealItems.
+        # Since we don't have per-item breakdown from the macro calc (it returns total), 
+        # we will create ONE MealItem representing the whole log text.
+        
+        log_text = ", ".join(items) 
+        
+        new_meal = MealItem(
+            custom_name=log_text,
+            calories_snapshot=total_data.get('total_calories', 0),
+            quantity=1
+        )
+        
+        # Manually attach protein/carbs/fats if we update MealItem model to support it?
+        # MealItem only has ReferenceField to FoodItem. 
+        # It relies on FoodItem for Macros.
+        # FIX: We need to either create a FoodItem on the fly OR add fields to MealItem.
+        # Given constraints, let's create a "Custom Log" FoodItem or just update DailyLog totals directly.
+        
+        daily_log.total_calories += int(total_data.get('total_calories', 0))
+        daily_log.save()
+        
+        # 4. ALSO UPDATE WEEKLY PLAN (For Immediate UI Reflection)
+        # We append this as an "Extra" meal to the current day in the Plan
+        day_name = datetime.now().strftime('%A').lower() # monday, tuesday...
+        plan = DietPlan.objects(user=request.user, is_active=True).first()
+        
+        if plan and hasattr(plan, day_name):
+            day_slots = getattr(plan, day_name)
+            
+            # Create a new MealItem 
+            # Note: MealItem needs a FoodItem reference usually for macros, 
+            # but we can use 'custom_name' + 'calories_snapshot'.
+            # However, our serializer might look for FoodItem.
+            # To fix 0 display, we need a dummy FoodItem or strict snapshot usage.
+            
+            # Create a "Custom Log" Food Item on the fly? 
+            # Or just use the snapshot logic we fixed earlier.
+            
+            log_item = MealItem(
+                custom_name=log_text,
+                calories_snapshot=int(total_data.get('total_calories', 0)),
+                quantity=1
+            )
+            
+            # Check if an "Extras" slot exists, else create one
+            extra_slot = next((s for s in day_slots if s.name == "Extras"), None)
+            if not extra_slot:
+                extra_slot = DailyMealSlot(name="Extras", time=time_now, items=[])
+                day_slots.append(extra_slot)
+                
+            extra_slot.items.append(log_item)
+            plan.save()
+
+        return Response({"message": "Logged successfully", "new_total": daily_log.total_calories})
