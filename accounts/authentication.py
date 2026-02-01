@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 from django.conf import settings
 from rest_framework import authentication, exceptions
-from accounts.models import User, GymOwner
+from accounts.models import User
 from bson.objectid import ObjectId
 
 class MongoJWTAuthentication(authentication.BaseAuthentication):
@@ -31,15 +31,12 @@ class MongoJWTAuthentication(authentication.BaseAuthentication):
         user_id = payload.get('user_id')
         role = payload.get('role')
 
-        if not user_id or not role:
+        if not user_id:
             raise exceptions.AuthenticationFailed('Invalid token payload')
 
         user = None
         try:
-            if role == 'GYM_OWNER':
-                user = GymOwner.objects(id=user_id).first()
-            else:
-                user = User.objects(id=user_id).first()
+            user = User.objects(id=user_id).first()
         except:
              raise exceptions.AuthenticationFailed('Invalid User ID')
 

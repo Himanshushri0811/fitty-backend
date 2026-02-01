@@ -22,6 +22,7 @@ class FoodItemSerializer(serializers.Serializer):
     goal_tags = serializers.ListField(child=serializers.CharField())
     benefits = serializers.ListField(child=serializers.CharField())
     description = serializers.CharField()
+    image_url = serializers.CharField(required=False, allow_null=True)
     
     # New Fields
     best_time = serializers.ListField(child=serializers.CharField())
@@ -56,7 +57,10 @@ class DietProfileSerializer(serializers.Serializer):
         return instance
 
 class MealItemSerializer(serializers.Serializer):
-    food_item_id = serializers.CharField(required=False)
+    food_item_id = serializers.SerializerMethodField()
+    def get_food_item_id(self, obj):
+        return str(obj.food_item.id) if obj.food_item else None
+
     food_name = serializers.SerializerMethodField()
     custom_name = serializers.CharField(required=False)
     quantity = serializers.FloatField(default=1.0)
@@ -73,6 +77,12 @@ class MealItemSerializer(serializers.Serializer):
     food_benefits = serializers.SerializerMethodField()
     food_budget = serializers.SerializerMethodField()
     food_prep_time = serializers.SerializerMethodField()
+    food_image = serializers.SerializerMethodField()
+
+    def get_food_image(self, obj):
+        item = self.get_food_item(obj)
+        return item.image_url if item and hasattr(item, 'image_url') else None
+
 
     def get_food_item(self, obj):
         try:

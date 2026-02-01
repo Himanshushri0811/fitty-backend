@@ -2,36 +2,6 @@ from mongoengine import Document, StringField, EmailField, DateTimeField, Boolea
 from datetime import datetime
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
-class FitMitraUser(Document):
-    """
-    Base User Document for Pure Mongo Auth
-    No SQL dependencies. Optimized for MongoDB Atlas TLS.
-    """
-    meta = {
-        'allow_inheritance': True,
-        'indexes': ['email'],
-        'abstract': True
-    }
-    
-    email = EmailField(required=True, unique=True)
-    password = StringField(required=True)
-    is_active = BooleanField(default=True)
-    created_at = DateTimeField(default=datetime.utcnow)
-    role = StringField(required=True) # USER, GYM_OWNER
-    name = StringField() # Full Name for User, Owner Name for GymOwner
-    profile_pic = StringField(default="") # URL/Path to profile picture
-    cover_pic = StringField(default="") # URL/Path to cover picture
-
-    def set_password(self, raw_password):
-        self.password = make_password(raw_password)
-
-    def check_password(self, raw_password):
-        return django_check_password(raw_password, self.password)
-
-    @property
-    def is_authenticated(self):
-        return True
-
 class WorkoutExercise(EmbeddedDocument):
     name = StringField(required=True)
     sets = StringField()
@@ -51,54 +21,76 @@ class WorkoutFeedback(EmbeddedDocument):
     fatigue_level = IntField(min_value=1, max_value=10)
     form_quality = StringField(choices=('Good', 'Needs Improvement', 'Poor'))
 
-
-class User(FitMitraUser):
-    meta = {'collection': 'users'}
-    username = StringField(required=True, unique=True)
+class User(Document):
+    """
+    Unified User Model for Athletes and Gym Owners.
+    Single Source of Truth.
+    """
+    meta = {
+        'collection': 'users',
+        'indexes': [
+            'email',
+            'username',
+            'role' 
+        ]
+    }
     
-    # Profile stats
+    # Core Auth Fields
+    email = EmailField(required=True, unique=True)
+    username = StringField(required=True, unique=True) # For GymOwners, we can auto-fill this with email part if not provided
+    password = StringField(required=True)
+    role = StringField(required=True, default='USER', choices=('USER', 'GYM_OWNER')) 
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.utcnow)
+    
+    # Common Profile Fields
+    name = StringField() 
+    profile_pic = StringField(default="") 
+    cover_pic = StringField(default="") 
+
+    # --- Athlete (Normal User) Specific Fields ---
     goal = StringField()
     age = IntField()
     gender = StringField()
+    height = FloatField()
+    weight = FloatField()
+    bio = StringField()
     fitness_level = StringField(default='Beginner')
-    
-    # Workout Schedule & History
     weekly_plan = EmbeddedDocumentListField(WorkoutDay)
     workout_history = EmbeddedDocumentListField(WorkoutFeedback)
+    workouts_completed = IntField(default=0)
 
-    # Assistant Usage Tracking
-    assistant_daily_usage = IntField(default=0)
-    last_assistant_usage_date = DateField()
-
-
-class GymOwner(FitMitraUser):
-    meta = {'collection': 'gym_owners'}
-    gym_name = StringField(required=True)
+    # --- Gym Owner Specific Fields ---
+    gym_name = StringField()
     gym_address = StringField()
-
-    # Subscription & Dashboard Logic
     plan_type = StringField(default='FREE', choices=('FREE', 'PRO')) 
     plan_expiry = DateTimeField()
     is_pro_active = BooleanField(default=False)
     subscription_status = StringField(default='ACTIVE', choices=('ACTIVE', 'PAST_DUE', 'CANCELLED'))
-    
-    # Branding
     branding_logo = StringField(default="")
+    
+    # Gym Simulation Data
+    monthly_fee_per_member = FloatField(default=500.0) 
+    current_profit = FloatField(default=0.0) 
+    max_members_limit = IntField(default=25) # 25 for FREE, 1000 for PRO
+    current_member_count = IntField(default=0)
+    dashboard_status = StringField(default='ACTIVE')
 
-    # Assistant Usage Tracking
+    # Assistant Usage Tracking (Common)
     assistant_daily_usage = IntField(default=0)
     last_assistant_usage_date = DateField()
 
-    # Simulation Data
-    monthly_fee_per_member = FloatField(default=500.0) # Simulation base
-    current_profit = FloatField(default=0.0) 
-    
-    # Operational Limits
-    max_members_limit = IntField(default=25) # 25 for FREE, 1000 for PRO
-    current_member_count = IntField(default=0)
-    
-    dashboard_status = StringField(default='ACTIVE')
+    def set_password(self, raw_password):
+        self.password = make_password(raw_password)
 
+    def check_password(self, raw_password):
+        return django_check_password(raw_password, self.password)
+
+    @property
+    def is_authenticated(self):
+        return True
+
+    # Gym Owner Helper Methods
     def update_plan(self, plan_name):
         self.plan_type = plan_name
         self.is_pro_active = (plan_name == 'PRO')
@@ -109,7 +101,10 @@ class GymOwner(FitMitraUser):
         self.save()
 
     def calculate_simulation(self):
-        """
-        Calculates potential profit based on member count and fee
-        """
         return self.current_member_count * self.monthly_fee_per_member
+
+# For backward compatibility / ease of refactoring, 
+# although we should update usages to User.objects(role='GYM_OWNER')
+# We cannot easily alias a filtered QuerySet to a class name in Python at module level for imports.
+# But we can alias the class for type checking or direct instantiation (though logic differs).
+GymOwner = User 

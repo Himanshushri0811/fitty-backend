@@ -2,10 +2,16 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
+import random
 
 from .models import DietProfile, FoodItem, DietPlan, MealItem
 from .serializers import DietProfileSerializer, FoodItemSerializer, DietPlanSerializer
 from .utils import calculate_target_calories, get_or_create_weekly_plan
+
+# Lazy Import to avoid circular dependencies if any
+def get_ai_generator():
+    from ai.services.food_generator import generate_food_persona
+    return generate_food_persona
 
 class DietProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -192,3 +198,146 @@ class SeedFoodView(APIView):
                 count += 1
                 
         return Response({"message": f"Seeded {count} foods"})
+
+# ---------------------------------------------------
+# NEW: AI SMART BOX VIEW
+# ---------------------------------------------------
+
+class DietCarouselView(APIView):
+    """
+    Returns foods for the AI Smart Box. 
+    Triggers AI Generation if content is missing.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user_name = request.user.name or "Friend"
+        
+        # 0. Get User Context
+        profile = DietProfile.objects(user=request.user).first()
+        goal = profile.goal if profile else "Healthy"
+        diet_type = profile.diet_type if profile else "Veg"
+
+        # 1. Fetch foods suitable for the user (Goal + Diet)
+        # We try to find foods that match the goal OR just general healthy ones
+        
+        # Count existing relevant foods
+        # Filter Logic: Type matches AND (Goal matches OR generic)
+        # MongoEngine doesn't support easy OR query with text search mixed, so we do simple filtering
+        
+        relevant_count = FoodItem.objects(type=diet_type).count()
+        
+        # DYNAMIC DISCOVERY: If we have very few foods, fetch from AI
+        if relevant_count < 10:
+             # Lazy import discovery
+             from ai.services.food_discovery import discover_new_foods
+             # Trigger explicitly (blocking for now, ideally background task)
+             discover_new_foods(goal, diet_type)
+
+        # 2. Get Random Sample
+        pipeline = [
+            {"$match": {"type": diet_type}}, 
+            {"$sample": {"size": 5}}
+        ]
+        
+        random_foods = list(FoodItem.objects.aggregate(*pipeline))
+        
+        results = []
+        gen_func = get_ai_generator()
+        user_name = request.user.name or "Friend"
+        
+        for food_data in random_foods:
+            # Aggregate returns dict, not Document object.
+            # We need to update if fields are missing.
+            # Convert to ID to fetch Document for saving.
+            f_id = food_data['_id']
+            # We should refetch as Document to save updates easily
+            food_doc = FoodItem.objects(id=f_id).first()
+            if not food_doc: continue
+            
+            # Check if AI content exists
+            if not food_doc.ai_persona_text:
+                # Generate!
+                nutrient_summary = f"{food_doc.calories} cal, {food_doc.protein}g protein"
+                ai_content = gen_func(food_doc.name, user_name, nutrient_summary)
+                
+                food_doc.ai_persona_text = ai_content.get("persona_text", "")
+                food_doc.benefits = ai_content.get("benefits", [])
+                food_doc.fitness_relevance = ai_content.get("fitness_relevance", "")
+                # Default image if empty (Use a placeholder service or Unsplash if we had logic)
+                if not food_doc.image_url:
+                     # Simple logic: generated placeholder with text
+                     food_doc.image_url = f"https://placehold.co/400x300?text={food_doc.name.replace(' ', '+')}"
+                
+                food_doc.save()
+            
+            # Build Response
+            results.append({
+                "id": str(food_doc.id),
+                "name": food_doc.name,
+                "image_url": food_doc.image_url,
+                "persona_text": food_doc.ai_persona_text,
+                "fitness_relevance": food_doc.fitness_relevance,
+                "benefits": food_doc.benefits,
+                "macros": {
+                    "calories": food_doc.calories,
+                    "protein": food_doc.protein,
+                    "carbs": food_doc.carbs,
+                    "fats": food_doc.fats
+                }
+            })
+            
+        return Response(results)
+
+class DietFoodDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, id):
+        food = FoodItem.objects(id=id).first()
+        if not food: return Response({"error": "Not Found"}, 404)
+        
+        # Check if we have deep details (Using 'description' as proxy for long desc)
+        # Or better, just generate it on the fly and cache it in a new field if possible, 
+        # or just return it.
+        
+        from ai.services.food_generator import generate_food_deep_dive
+        
+        # If description is short, assume we need a deep dive
+        # Ideally we add a 'deep_dive_data' DictField to model, but for now let's just 
+        # return the AI generated data directly.
+        
+        ai_data = generate_food_deep_dive(food.name)
+        
+        # Merge with existing data
+        response_data = FoodItemSerializer(food).data
+        response_data['deep_dive'] = ai_data
+        
+        # Fix image if broken or using unsplash (basic check)
+        img_url = response_data.get('image_url', "")
+        if not img_url or "unsplash" in img_url:
+             # Fallback if unsplash links are dead
+             s_name = food.name.replace(" ", "+")
+             response_data['image_url'] = f"https://placehold.co/600x400/2a2a35/FFF?text={s_name}"
+        
+        return Response(response_data)
+
+class CalculateMacrosView(APIView):
+    """
+    Takes natural language food log and returns estimated nutrition via AI.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        text = request.data.get('text', '')
+        if not text:
+            return Response({"error": "Text is required"}, 400)
+        
+        # Lazy import
+        from ai.services.food_generator import calculate_macros_from_text
+        
+        result = calculate_macros_from_text(text)
+        
+        if "error" in result:
+             return Response(result, 500)
+             
+        return Response(result)
