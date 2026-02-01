@@ -1,7 +1,9 @@
 from django.urls import path
 from .views import (
     GymOwnerDashboardOverview, 
-    MemberManagerView
+    MemberManagerView,
+    GymProfileView,
+    NotificationView
 )
 
 urlpatterns = [
@@ -10,4 +12,10 @@ urlpatterns = [
     
     # Member Management (Plan-enforced limits)
     path('members/', MemberManagerView.as_view(), name='gym_members'),
+
+    # Profile Settings
+    path('profile/', GymProfileView.as_view(), name='gym_profile'),
+
+    # Notifications
+    path('notifications/', NotificationView.as_view(), name='gym_notifications'),
 ]
