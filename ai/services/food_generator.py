@@ -1,26 +1,77 @@
 import google.generativeai as genai
 import json
 import os
+import requests
+import traceback
 from django.conf import settings
 
-# Configure API (Reuse existing setup)
-api_key = os.getenv("GEMINI_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
-if api_key:
-    genai.configure(api_key=api_key)
+# --- API KEYS ---
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or getattr(settings, 'GROQ_API_KEY', None)
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 from ai.services.model_selector import get_best_gemini_model
+
+# --- HELPER: ROBUST GENERATION ---
+def generate_robust_json(prompt, error_context="Generation"):
+    """
+    Tries Gemini first, then falls back to Groq Llama3.
+    """
+    
+    # 1. Try Groq (PRIORITY due to Gemini issues)
+    if GROQ_API_KEY:
+        try:
+            # print("🚀 Calling Groq (llama-3.3-70b-versatile)...")
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": "You are a JSON-only API. Return valid JSON only. No markdown."},
+                    {"role": "user", "content": prompt}
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.3
+            }
+            resp = requests.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                content = resp.json()['choices'][0]['message']['content']
+                return json.loads(content)
+            else:
+                pass
+                # print(f"❌ Groq API Error: {resp.text}")
+        except Exception as e:
+            pass
+            # print(f"❌ Groq Exception: {e}")
+
+    # 2. Try Gemini (Fallback)
+    if GEMINI_API_KEY:
+        try:
+            model_name = get_best_gemini_model()
+            # print(f"🤖 Trying Gemini ({model_name})...") 
+            model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
+            response = model.generate_content(prompt)
+            return json.loads(response.text)
+        except Exception as e:
+            pass
+            # print(f"⚠️ Gemini Failed in {error_context}: {e}")
+            # Continue to fail
+
+    # 3. Fail
+    # print(f"❌ All AI Providers failed for {error_context}")
+    return None
+
+# --- PUBLIC FUNCTIONS ---
 
 def generate_food_persona(food_name, user_name, nutrient_summary=""):
     """
     Generates a Hinglish persona for a food item.
     """
-    if not api_key:
-        return {
-            "persona_text": f"Hello {user_name}, I am {food_name}. Please check my benefits!",
-            "benefits": ["Healthy", "Nutritious"],
-            "fitness_relevance": "Good for health"
-        }
-
     prompt = f"""
     You are a fitness nutrition expert. 
     Role: You ARE the food item itself ({food_name}).
@@ -45,26 +96,22 @@ def generate_food_persona(food_name, user_name, nutrient_summary=""):
     }}
     """
     
-    try:
-        model_name = get_best_gemini_model()
-        model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Gemini Food Gen Error: {e}")
-        return {
-             "persona_text": f"Namaste {user_name}, main {food_name} hoon. Connection error, but I am still healthy!",
-             "benefits": ["High Nutrition", "Natural"],
-             "fitness_relevance": "Good for general fitness"
-        }
+    data = generate_robust_json(prompt, "Food Persona")
+    
+    if data:
+        return data
+    
+    # Fallback Data
+    return {
+            "persona_text": f"Namaste {user_name}, main {food_name} hoon. I am offline but healthy!",
+            "benefits": ["High Nutrition", "Natural"],
+            "fitness_relevance": "Good for general fitness"
+    }
 
 def calculate_macros_from_text(food_text):
     """
     Parses natural language food text (e.g., "2 roti and dal") and estimates macros.
     """
-    if not api_key:
-        return {"calories": 0, "protein": 0, "carbs": 0, "fats": 0, "items": []}
-
     prompt = f"""
     Analyze the following food log and calculate total approximate nutrition.
     Food Log: "{food_text}"
@@ -74,7 +121,7 @@ def calculate_macros_from_text(food_text):
     Task:
     1. Identify items and quantities.
     2. Estimate Calories, Protein(g), Carbs(g), Fats(g).
-    3. Sum them up.
+    3. Sum them up to get 'total_calories', 'total_protein', etc.
 
     Output JSON ONLY:
     {{
@@ -86,22 +133,17 @@ def calculate_macros_from_text(food_text):
     }}
     """
     
-    try:
-        model_name = get_best_gemini_model()
-        model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Gemini Macro Calc Error: {e}")
-        return {"error": "Failed to calculate macros"}
+    data = generate_robust_json(prompt, "Macro Calc")
+    
+    if data:
+        return data
+
+    return {"error": "Failed to calculate macros. AI services unavailable."}
 
 def generate_food_deep_dive(food_name):
     """
     Generates detailed research content for a food (Simulating a Google Search).
     """
-    if not api_key:
-        return {"description": "API Key Missing", "recipes": [], "history": ""}
-
     prompt = f"""
     Research detailed information about: "{food_name}".
     Role: You are a food historian and chef.
@@ -120,11 +162,8 @@ def generate_food_deep_dive(food_name):
     }}
     """
     
-    try:
-        model_name = get_best_gemini_model()
-        model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Gemini Deep Dive Error: {e}")
-        return {"error": "Failed to research"}
+    data = generate_robust_json(prompt, "Deep Dive")
+    if data: 
+        return data
+        
+    return {"description": "Research unavailable offline.", "recipes": [], "history": ""}
