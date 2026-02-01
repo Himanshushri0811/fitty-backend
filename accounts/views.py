@@ -1,17 +1,20 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import User, GymOwner
+from .models import User, GymOwner, WorkoutDay, WorkoutExercise, WorkoutFeedback
 from .authentication import generate_jwt
 # import razorpay (Moved to inside method to prevent pkg_resources startup crash)
 from django.conf import settings
 from datetime import datetime
 import mongoengine
+from mongoengine.queryset.visitor import Q
 import random
 from .workout_plans import DEFAULT_WORKOUT_PLANS
-from .models import User, GymOwner, WorkoutDay, WorkoutExercise, WorkoutFeedback
 from ai.utils import get_gemini_response # Assuming this exists or similar util
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class HealthCheckView(APIView):
     def get(self, request):
@@ -21,10 +24,6 @@ class HealthCheckView(APIView):
         except Exception as e:
             return Response({"mongo": "error", "message": str(e)}, status=503)
 
-import logging
-
-logger = logging.getLogger(__name__)
-
 class SignupAPIView(APIView):
     def post(self, request):
         try:
@@ -33,7 +32,7 @@ class SignupAPIView(APIView):
             password = data.get('password')
             name = data.get('name', '').strip()
             
-            # Determine role: Use explicit role or detect via gym_name presence
+            # Determine role
             role = data.get('role')
             if not role:
                 if 'gym_name' in data or 'gym-owner' in request.path:
@@ -43,30 +42,42 @@ class SignupAPIView(APIView):
 
             if not email or not password:
                 return Response({'error': 'Email and password required'}, status=400)
+            
+            # Determine Username
+            username = data.get('username')
+            if username:
+                username = username.strip() # maintain case for display, but check specific for query? 
+                                            # actually, best to just store lowercase or verify case-insensitive uniqueness.
+                                            # We will enforce lowercase for username strictness to avoid ambiguity
+                username = username.lower()
+            else:
+                # Auto-generate username from email if not provided (common for Gym Owners)
+                base_username = email.split('@')[0]
+                username = base_username
+                counter = 1
+                while User.objects(username=username).first():
+                    username = f"{base_username}{counter}"
+                    counter += 1
+
+            # Check Global Uniqueness (Single Source of Truth)
+            if User.objects(Q(email=email) | Q(username=username)).first():
+                return Response({'error': 'Email or Username already taken'}, status=400)
+
+            # Create User
+            user = User(
+                email=email,
+                username=username,
+                role=role,
+                name=name
+            )
 
             if role == 'GYM_OWNER':
-                if GymOwner.objects(email=email).first():
-                    return Response({'error': 'Gym Owner with this email exists'}, status=400)
-                user = GymOwner(
-                    email=email, 
-                    gym_name=data.get('gym_name', 'My Gym'), 
-                    role='GYM_OWNER',
-                    gym_address=data.get('gym_address', ''),
-                    name=name
-                )
+                user.gym_name = data.get('gym_name', 'My Gym')
+                user.gym_address = data.get('gym_address', '')
             else:
-                username = data.get('username', email.split('@')[0])
-                if User.objects(email=email).first() or User.objects(username=username).first():
-                    return Response({'error': 'Email or Username already taken'}, status=400)
-                user = User(
-                    email=email, 
-                    username=username, 
-                    role='USER',
-                    goal=data.get('goal', ''),
-                    age=int(data.get('age')) if data.get('age') else None,
-                    gender=data.get('gender', ''),
-                    name=name
-                )
+                user.goal = data.get('goal', '')
+                if data.get('age'): user.age = int(data.get('age'))
+                user.gender = data.get('gender', '')
 
             user.set_password(password)
             user.save()
@@ -77,7 +88,8 @@ class SignupAPIView(APIView):
                     'email': user.email, 
                     'role': user.role, 
                     'id': str(user.id),
-                    'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                    'name': user.name if user.name else getattr(user, 'gym_name', user.username),
+                    'username': user.username,
                     'gym_name': getattr(user, 'gym_name', None),
                     'plan': getattr(user, 'plan_type', 'FREE')
                 },
@@ -97,17 +109,11 @@ class LoginAPIView(APIView):
         if not identifier or not password:
             return Response({'error': 'Credentials required'}, status=400)
 
-        # Try to find user in both collections
-        user = None
-        
-        # 1. Check GymOwner (Login by Email usually)
-        user = GymOwner.objects(email=identifier).first()
-        
-        # 2. Check User (Login by Email or Username)
-        if not user:
-            user = User.objects(email=identifier).first()
-        if not user:
-            user = User.objects(username=identifier).first()
+        # Unified Login Logic
+        # Case-insensitive search requires regex or collation, but here we enforce lower on input.
+        # If we stored mixed case, we'd need __iexact.
+        # We used __iexact to be safe.
+        user = User.objects(Q(email__iexact=identifier) | Q(username__iexact=identifier)).first()
 
         if not user or not user.check_password(password):
             return Response({'error': 'Invalid Credentials'}, status=401)
@@ -119,7 +125,8 @@ class LoginAPIView(APIView):
                 'email': user.email,
                 'role': user.role,
                 'id': str(user.id),
-                'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+                'name': user.name if user.name else getattr(user, 'gym_name', user.username),
+                'username': user.username,
                 'gym_name': getattr(user, 'gym_name', None),
                 'plan': getattr(user, 'plan_type', 'FREE')
             },
@@ -128,16 +135,6 @@ class LoginAPIView(APIView):
         })
 
 from rest_framework import status, permissions
-
-# ... imports ...
-
-# class ProfileView(APIView):
-#     permission_classes = [permissions.IsAuthenticated]
-#
-#     def get(self, request):
-#         user = request.user
-#         # Debugging User State
-#         print(f"DEBUG: ProfileView Accessed. User: {user}, Auth: {user.is_authenticated}")
 
 class ProfileView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -152,21 +149,21 @@ class ProfileView(APIView):
             'id': str(user.id),
             'email': user.email,
             'role': user.role,
-            'name': user.name if user.name else getattr(user, 'gym_name', getattr(user, 'username', 'User')),
+            'name': user.name if user.name else getattr(user, 'gym_name', user.username),
             'username': getattr(user, 'username', ''),
             'profile_pic': getattr(user, 'profile_pic', ''),
             'cover_pic': getattr(user, 'cover_pic', ''),
             'plan': getattr(user, 'plan_type', 'FREE'),
-            'bio': getattr(user, 'bio', ''), # Ensure model has this or decide to add it, user might have mixed it with User model fields
-            # Add User specific fields
+            'bio': getattr(user, 'bio', ''),
+            # User specific fields
             'age': getattr(user, 'age', None),
             'gender': getattr(user, 'gender', ''),
             'height': getattr(user, 'height', None),
             'weight': getattr(user, 'weight', None),
             'goal': getattr(user, 'goal', ''),
             'fitness_level': getattr(user, 'fitness_level', 'Beginner'),
-            'workouts_completed': getattr(user, 'workouts_completed', 0) if hasattr(user, 'workouts_completed') else 0,
-            # For GymOwner specific
+            'workouts_completed': getattr(user, 'workouts_completed', 0),
+            # GymOwner specific
             'gym_name': getattr(user, 'gym_name', ''),
             'gym_address': getattr(user, 'gym_address', '')
         }
@@ -181,18 +178,17 @@ class ProfileView(APIView):
         data = request.data
         
         # Update allowed fields
-        editable_fields = ['name', 'age', 'gender', 'height', 'weight', 'goal', 'fitness_level', 'bio', 'gym_address']
+        editable_fields = ['name', 'age', 'gender', 'height', 'weight', 'goal', 'fitness_level', 'bio', 'gym_address', 'gym_name']
         
         for field in editable_fields:
             if field in data:
-                # Basic validation or casting could go here
                 val = data[field]
                 if field in ['age', 'height', 'weight'] and val == "":
                     val = None
                 setattr(user, field, val)
         
         user.save()
-        return self.get(request) # Return updated profile
+        return self.get(request) 
 
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
@@ -373,8 +369,6 @@ class UserWorkoutPlanAPI(APIView):
         if 'focus' in data:
             day_obj.focus = data['focus']
             
-        # For this version, we might not assume full exercise editing yet, mostly focus update
-        # But if exercises are passed:
         if 'exercises' in data:
             new_ex_list = []
             for ex in data['exercises']:
@@ -438,12 +432,9 @@ class WorkoutExplanationAPI(APIView):
         Be encouraging and scientific but simple.
         """
         
-        # Call AI (Mocking implementation if actual Gemini call fails or is not setup in utils yet)
         try:
             explanation = get_gemini_response(prompt)
         except:
-             # Fallback if AI service is not reachable
              explanation = f"Since your goal is {goal}, today's focus on {today_workout.focus} is designed to optimize your progress!"
         
         return Response({'explanation': explanation})
-

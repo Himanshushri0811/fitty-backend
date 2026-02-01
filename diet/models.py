@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, IntField, FloatField, BooleanField, ListField, EmbeddedDocument, EmbeddedDocumentField, ReferenceField, DateTimeField, CASCADE
+from mongoengine import Document, StringField, IntField, FloatField, BooleanField, ListField, EmbeddedDocument, EmbeddedDocumentField, ReferenceField, DateTimeField, CASCADE, DictField
 from accounts.models import User
 from datetime import datetime
 
@@ -24,8 +24,17 @@ class FoodItem(Document):
     
     # "Why this meal?"
     goal_tags = ListField(StringField(choices=('Fat Loss', 'Muscle Gain', 'Maintenance', 'Keto', 'Energy')))
-    benefits = ListField(StringField()) # Explainable AI hooks: "High Fiber", "Satiety"
+    benefits = ListField(StringField()) # Explainable AI hooks: "High Fiber", "Satiety" e.g., ["High Fiber", "Satiety"]
+    
+    # SMART BOX Fields
+    ai_persona_text = StringField() # AI-Generated "Hello X..."
+    fitness_relevance = StringField() # "Best for pre-workout..."
+    image_url = StringField() # Unsplash URL
+
     description = StringField() # "Rich in complex carbs..."
+    
+    # Deep Dive Cache (New)
+    deep_dive_data = DictField()
     
     # Slotting & Practicality
     best_time = ListField(StringField(choices=('Breakfast', 'Lunch', 'Dinner', 'Snack')))
