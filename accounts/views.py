@@ -15,6 +15,121 @@ import os
 import logging
 
 logger = logging.getLogger(__name__)
+    
+# Import for email and UUID
+from django.core.mail import send_mail
+from django.conf import settings
+import uuid
+from datetime import timedelta
+
+class ForgotPasswordAPIView(APIView):
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+        
+        # Strict Email Validation
+        if not email:
+            return Response({'error': 'Email is required'}, status=400)
+            
+        import re
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            return Response({'error': 'Invalid email format'}, status=400)
+        
+        user = User.objects(email=email).first()
+        
+        # Always return 200 to prevent enumeration, but log internal state
+        if not user:
+            logger.info(f"Forgot password requested for non-existent email: {email}")
+            return Response({'message': 'If an account exists with this email, a reset link has been sent.'}, status=200)
+            
+        # Generate Secure Token
+        token = str(uuid.uuid4())
+        
+        # Set Expiry (20 minutes)
+        expiry_time = datetime.utcnow() + timedelta(minutes=20)
+        
+        user.reset_password_token = token
+        user.reset_password_expiry = expiry_time
+        user.save()
+        
+        # Build Link
+        # In production this should be settings.FRONTEND_URL. Hardcoding for dev.
+        reset_link = f"https://fitty-ai.netlify.app/auth/reset-password/{token}"
+        # Fallback to localhost if needed for testing, but user asked for fitty-ai.netlify.app
+        # reset_link = f"http://localhost:3000/auth/reset-password/{token}" 
+
+        subject = "Reset Your FitMitra Password"
+        message = f"""
+Click the link below to reset your password:
+
+{reset_link}
+
+This link will expire in 20 minutes.
+
+If you did not request this, please ignore this email.
+"""
+        
+        try:
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+                fail_silently=False,
+            )
+            logger.info(f"Reset email sent to {email}")
+        except Exception as e:
+            logger.error(f"Email send failed: {e}")
+            # In a strict security audit, you might not want to return 500 here either, but for UX:
+            return Response({'error': 'Failed to send email. Please try again later.'}, status=500)
+            
+        return Response({'message': 'If an account exists with this email, a reset link has been sent.'})
+
+class VerifyResetTokenAPIView(APIView):
+    def get(self, request):
+        token = request.query_params.get('token')
+        
+        if not token:
+            return Response({'error': 'Token is required'}, status=400)
+            
+        user = User.objects(reset_password_token=token).first()
+        
+        if not user:
+            return Response({'valid': False, 'error': 'Invalid or expired token'}, status=400)
+            
+        if user.reset_password_expiry < datetime.utcnow():
+            return Response({'valid': False, 'error': 'Token has expired'}, status=400)
+            
+        return Response({'valid': True, 'message': 'Token is valid'})
+
+class ResetPasswordAPIView(APIView):
+    def post(self, request):
+        token = request.data.get('token')
+        new_password = request.data.get('new_password')
+        
+        if not token or not new_password:
+            return Response({'error': 'Token and new password are required'}, status=400)
+            
+        if len(new_password) < 6:
+            return Response({'error': 'Password must be at least 6 characters'}, status=400)
+            
+        user = User.objects(reset_password_token=token).first()
+        
+        if not user:
+            return Response({'error': 'Invalid or used token'}, status=400)
+            
+        if user.reset_password_expiry < datetime.utcnow():
+            return Response({'error': 'Token has expired'}, status=400)
+            
+        # Reset Password
+        user.set_password(new_password)
+        
+        # Clear Token and Expiry to prevent reuse
+        user.reset_password_token = None
+        user.reset_password_expiry = None
+        user.save()
+        
+        return Response({'message': 'Password reset successfully'})
+
 
 class HealthCheckView(APIView):
     def get(self, request):
@@ -78,6 +193,12 @@ class SignupAPIView(APIView):
                 user.goal = data.get('goal', '')
                 if data.get('age'): user.age = int(data.get('age'))
                 user.gender = data.get('gender', '')
+                user.mobile = data.get('mobile', '')
+                user.dob = data.get('dob') # Ensure format YYYY-MM-DD or parse it
+                user.activity_level = data.get('activity_level', 'Moderately Active')
+                user.fitness_level = data.get('fitness_level', 'Beginner')
+                if data.get('height'): user.height = float(data.get('height'))
+                if data.get('weight'): user.weight = float(data.get('weight'))
 
             user.set_password(password)
             user.save()
@@ -144,6 +265,30 @@ class ProfileView(APIView):
         if not user:
             return Response({'error': 'Unauthorized'}, status=401)
         
+        # Calculate Stats (BMI, Ideal Weight)
+        bmi = None
+        bmi_category = "N/A"
+        ideal_weight_range = "N/A"
+        
+        if user.height and user.weight:
+            # BMI = weight (kg) / (height (m) ^ 2)
+            h_m = user.height / 100
+            bmi_val = user.weight / (h_m * h_m)
+            bmi = round(bmi_val, 1)
+            
+            if bmi < 18.5: bmi_category = "Underweight"
+            elif 18.5 <= bmi < 24.9: bmi_category = "Normal"
+            elif 25 <= bmi < 29.9: bmi_category = "Overweight"
+            else: bmi_category = "Obese"
+            
+            # Simple Hamwi Formula for Ideal Weight (Approx)
+            # Men: 48kg + 2.7kg per inch over 5ft
+            # Women: 45.5kg + 2.2kg per inch over 5ft
+            # Using simplified average for now: 22 BMI * h * h
+            ideal_min = round(18.5 * h_m * h_m, 1)
+            ideal_max = round(24.9 * h_m * h_m, 1)
+            ideal_weight_range = f"{ideal_min} - {ideal_max} kg"
+
         # Build profile data
         profile_data = {
             'id': str(user.id),
@@ -155,14 +300,35 @@ class ProfileView(APIView):
             'cover_pic': getattr(user, 'cover_pic', ''),
             'plan': getattr(user, 'plan_type', 'FREE'),
             'bio': getattr(user, 'bio', ''),
-            # User specific fields
+            
+            # Core Stats
             'age': getattr(user, 'age', None),
             'gender': getattr(user, 'gender', ''),
             'height': getattr(user, 'height', None),
             'weight': getattr(user, 'weight', None),
             'goal': getattr(user, 'goal', ''),
             'fitness_level': getattr(user, 'fitness_level', 'Beginner'),
+            
+            # Extended Fields (Phase 1)
+            'target_weight': getattr(user, 'target_weight', None),
+            'activity_level': getattr(user, 'activity_level', 'Moderately Active'),
+            'diet_preference': getattr(user, 'diet_preference', 'Non-Vegetarian'),
+            'medical_conditions': getattr(user, 'medical_conditions', []),
+            'allergies': getattr(user, 'allergies', []),
+            'preferred_workout_type': getattr(user, 'preferred_workout_type', 'Gym'),
+            'mobile': getattr(user, 'mobile', ''),
+            'dob': getattr(user, 'dob', None),
+
+            # Calculated Stats
+            'bmi': bmi,
+            'bmi_category': bmi_category,
+            'ideal_weight_range': ideal_weight_range,
+            
+            # Gamification
             'workouts_completed': getattr(user, 'workouts_completed', 0),
+            'current_streak': 0, # Placeholder for now, can implement real logic
+            'calories_burned': sum(log.calories_burned for log in getattr(user, 'daily_calories_log', [])),
+            
             # GymOwner specific
             'gym_name': getattr(user, 'gym_name', ''),
             'gym_address': getattr(user, 'gym_address', '')
@@ -178,26 +344,51 @@ class ProfileView(APIView):
         data = request.data
         
         # Update allowed fields
-        editable_fields = ['name', 'age', 'gender', 'height', 'weight', 'goal', 'fitness_level', 'bio', 'gym_address', 'gym_name']
+        editable_fields = [
+            'name', 'age', 'gender', 'height', 'weight', 'goal', 
+            'fitness_level', 'bio', 'gym_address', 'gym_name', 
+            'mobile', 'dob', 'activity_level', 
+            'target_weight', 'diet_preference', 'preferred_workout_type'
+        ]
         
+        # Lists need special handling if we want to replace or append, here we replace
+        list_fields = ['medical_conditions', 'allergies']
+
         for field in editable_fields:
             if field in data:
                 val = data[field]
-                if field in ['age', 'height', 'weight'] and val == "":
+                if field in ['age', 'height', 'weight', 'target_weight'] and val == "":
                     val = None
                 setattr(user, field, val)
         
+        for field in list_fields:
+            if field in data:
+                setattr(user, field, data[field])
+        
+        # Log weight history if weight changed
+        if 'weight' in data and data['weight']:
+            try:
+                new_weight = float(data['weight'])
+                # avoid duplicates for same day? For now just append.
+                # In robust app, check if today's log exists.
+                # Assuming WeightLog is imported
+                from .models import WeightLog
+                user.weight_history.append(WeightLog(weight=new_weight, date=datetime.utcnow()))
+            except:
+                pass
+        
         user.save()
-        return self.get(request) 
+        return self.get(request)
+ 
 
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 
 class UploadProfilePicView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         user = request.user
-        if not user:
-             return Response({'error': 'Unauthorized'}, status=401)
         
         file_obj = request.FILES.get('profile_pic') or request.FILES.get('cover_pic')
         is_cover = 'cover_pic' in request.FILES
@@ -212,18 +403,27 @@ class UploadProfilePicView(APIView):
         try:
             # Generate unique filename
             ext = file_obj.name.split('.')[-1]
-            filename = f"users/{user.id}/{'cover' if is_cover else 'avatar'}_{int(datetime.now().timestamp())}.{ext}"
+            timestamp = int(datetime.now().timestamp())
+            prefix = 'cover' if is_cover else 'avatar'
+            
+            # Using forward slashes is generally safer in Django storage regardless of OS
+            filename = f"users/{str(user.id)}/{prefix}_{timestamp}.{ext}"
             
             # Save file
             path = default_storage.save(filename, ContentFile(file_obj.read()))
-            file_url = settings.MEDIA_URL + path
+            
+            # Ensure path is always forward-slashed for URL construction
+            web_path = path.replace('\\', '/')
+            file_url = settings.MEDIA_URL + web_path
             
             # Update user model
             if is_cover:
                 user.cover_pic = file_url
             else:
                 user.profile_pic = file_url
+                
             user.save()
+            logger.info(f"User {user.id} uploaded {'cover' if is_cover else 'profile'} pic: {file_url}")
             
             return Response({
                 'status': 'success', 
@@ -231,9 +431,11 @@ class UploadProfilePicView(APIView):
                 'cover_pic': user.cover_pic
             })
         except Exception as e:
-            return Response({'error': str(e)}, status=500)
+            logger.error(f"File Upload Error for user {getattr(user, 'id', 'Unknown')}: {str(e)}", exc_info=True)
+            return Response({'error': 'Internal Server Error during upload'}, status=500)
 
 class VerifyPaymentAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
         razorpay_order_id = request.data.get('razorpay_order_id')
         razorpay_payment_id = request.data.get('razorpay_payment_id')
@@ -256,6 +458,7 @@ class VerifyPaymentAPIView(APIView):
             return Response({'error': str(e)}, status=400)
 
 class UserWorkoutPlanAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
     def get(self, request):
         user = request.user
         if not user or user.role != 'USER':
@@ -385,6 +588,7 @@ class UserWorkoutPlanAPI(APIView):
         return Response({'status': 'Plan updated'})
 
 class WorkoutFeedbackAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
         user = request.user
         if not user:
@@ -409,6 +613,7 @@ class WorkoutFeedbackAPI(APIView):
             return Response({'error': str(e)}, status=400)
 
 class WorkoutExplanationAPI(APIView):
+    permission_classes = [permissions.IsAuthenticated]
     def get(self, request):
         user = request.user
         if not user: return Response({'error': 'Unauthorized'}, status=401)

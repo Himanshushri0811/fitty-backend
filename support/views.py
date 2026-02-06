@@ -5,13 +5,27 @@ from .models import ContactMessage, LiveChatSession
 from .serializers import ContactMessageSerializer
 from datetime import datetime
 
+from common.utils import send_contact_email
+
 class ContactMessageView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ContactMessageSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            contact_msg = serializer.save()
+            
+            # Send Email Notification
+            try:
+                send_contact_email(
+                    subject=contact_msg.subject,
+                    message=contact_msg.message,
+                    email=contact_msg.email,
+                    name=contact_msg.name
+                )
+            except Exception as e:
+                print(f"Failed to send contact email: {e}")
+                
             return Response({"message": "Message sent successfully!"}, status=201)
         return Response(serializer.errors, status=400)
 

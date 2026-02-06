@@ -6,7 +6,7 @@ class PaymentHistory(Document):
     """
     Immutable log of all payments in MongoDB
     """
-    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=4) # CASCADE
+    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=2) # CASCADE
     order_id = StringField(required=True)
     payment_id = StringField()
     amount = DecimalField(precision=2)
@@ -21,7 +21,7 @@ class Member(Document):
     """
     Gym Members in MongoDB
     """
-    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=4)
+    gym_owner = ReferenceField(GymOwner, reverse_delete_rule=2)
     name = StringField(required=True)
     mobile = StringField(required=True)
     email = StringField()
