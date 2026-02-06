@@ -20,7 +20,9 @@ class WorkoutDay(Document):
 class Exercise(Document):
     name = StringField(required=True)
     target_muscle = StringField()
-
+    demo_video_url = StringField(default="") # URL to expert demo
+    pose_config = MapField(field=StringField()) # JSON-like storage for angles/rules
+    
     meta = {'collection': 'exercises'}
 
 class DayExercise(Document):

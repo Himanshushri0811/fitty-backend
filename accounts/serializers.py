@@ -7,6 +7,8 @@ class UserSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.CharField(read_only=True)
     goal = serializers.CharField(required=False)
+    mobile = serializers.CharField(required=False)
+    activity_level = serializers.CharField(required=False)
     
 class GymOwnerSerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)

@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from .models import Post, SocialProfile, Like, Comment, Follow
 from .serializers import PostSerializer, SocialProfileSerializer
+from accounts.models import User
 import json
 
 class FeedView(APIView):
@@ -33,9 +34,22 @@ class SocialProfileView(APIView):
 
     def get(self, request, username):
         profile = SocialProfile.objects(username=username).first()
+        
         if not profile:
-             return Response({"error": "Profile not found"}, status=404)
-        return Response(SocialProfileSerializer(profile).data)
+            # Check if user exists in accounts and create social profile
+            user = User.objects(username=username).first()
+            if not user:
+                return Response({"error": "Profile not found"}, status=404)
+            
+            # Create SocialProfile for the existing user
+            profile = SocialProfile(
+                user=user,
+                username=user.username,
+                fitness_goal=getattr(user, 'goal', 'Get Fit')
+            )
+            profile.save()
+            
+        return Response(SocialProfileSerializer(profile, context={'request': request}).data)
 
 class MyProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -67,3 +81,15 @@ class MyProfileView(APIView):
             profile.save()
         
         return Response(SocialProfileSerializer(profile).data)
+
+class UserPostListView(APIView):
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get(self, request, username):
+        user = User.objects(username=username).first()
+        if not user:
+            return Response({"error": "User not found"}, status=404)
+        
+        posts = Post.objects(author=user, is_active=True).order_by('-created_at')
+        serializer = PostSerializer(posts, many=True)
+        return Response(serializer.data)

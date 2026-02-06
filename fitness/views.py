@@ -2,11 +2,70 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .models import WaterIntake, DailyIntake, DailyPlan
-from .serializers import DailyPlanSerializer
+from .models import WaterIntake, DailyIntake, DailyPlan, PlanItem, Exercise
+from .serializers import WaterIntakeSerializer, DailyPlanSerializer, ExerciseSerializer
 from .utils import generate_daily_plan
 from datetime import datetime
 import pytz
+import re
+
+class ExerciseDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, name):
+        escaped_name = re.escape(name)
+        exercise = Exercise.objects(name__iexact=name).first()
+        if not exercise:
+            return Response({'error': 'Exercise not found'}, status=404)
+        serializer = ExerciseSerializer(exercise)
+        return Response(serializer.data)
+
+    def put(self, request, name):
+        # Allow Admin to update
+        # In real app: check request.user.is_staff or similar
+        escaped_name = re.escape(name)
+        exercise = Exercise.objects(name__iexact=name).first()
+        if not exercise:
+            return Response({'error': 'Exercise not found'}, status=404)
+        
+        serializer = ExerciseSerializer(exercise, data=request.data, partial=True)
+        if serializer.is_valid():
+            # Serializer save won't work directly with partial=True on MongoEngine object easily in DRF without custom update()
+            # So let's do manual update for simplicity or rely on serializer if configured right.
+            # DRF Serializer doesn't natively save to MongoEngine Document unless using mongoengine-drf serializer.
+            # We are using standard serializer.
+            data = serializer.validated_data
+            if 'demo_video_url' in data: exercise.demo_video_url = data['demo_video_url']
+            if 'pose_config' in data: exercise.pose_config = data['pose_config']
+            if 'target_muscle' in data: exercise.target_muscle = data['target_muscle']
+            exercise.save()
+            return Response(ExerciseSerializer(exercise).data)
+        return Response(serializer.errors, status=400)
+
+class ExerciseListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        exercises = Exercise.objects.all()
+        serializer = ExerciseSerializer(exercises, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = ExerciseSerializer(data=request.data)
+        if serializer.is_valid():
+            data = serializer.validated_data
+            if Exercise.objects(name=data['name']).first():
+                return Response({'error': 'Exercise already exists'}, status=400)
+            
+            ex = Exercise(
+                name=data['name'],
+                target_muscle=data.get('target_muscle', ''),
+                demo_video_url=data.get('demo_video_url', ''),
+                pose_config=data.get('pose_config', {})
+            )
+            ex.save()
+            return Response(ExerciseSerializer(ex).data, status=201)
+        return Response(serializer.errors, status=400)
 
 class WaterIntakeView(APIView):
     permission_classes = [IsAuthenticated]

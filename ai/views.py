@@ -27,6 +27,23 @@ class AISessionListAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+class AISessionDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, id):
+        """
+        Delete a specific chat session.
+        """
+        try:
+            session = ChatSession.objects(id=id, user=request.user).first()
+            if not session:
+                return Response({"error": "Session not found"}, status=404)
+            
+            session.delete()
+            return Response({"success": True})
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
 class AIChatAPIView(APIView):
     permission_classes = [IsAuthenticated]
 

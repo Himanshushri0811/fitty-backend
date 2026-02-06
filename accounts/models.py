@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField, DateField
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField, DateField, EmbeddedDocumentField
 from datetime import datetime
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
@@ -20,6 +20,16 @@ class WorkoutFeedback(EmbeddedDocument):
     difficulty = StringField(choices=('Easy', 'Medium', 'Hard'))
     fatigue_level = IntField(min_value=1, max_value=10)
     form_quality = StringField(choices=('Good', 'Needs Improvement', 'Poor'))
+
+class WeightLog(EmbeddedDocument):
+    date = DateTimeField(default=datetime.utcnow)
+    weight = FloatField(required=True)
+
+class DailyCalorieLog(EmbeddedDocument):
+    date = DateField(default=datetime.utcnow) # Only one entry per day
+    calories_burned = FloatField(default=0.0)
+    calories_consumed = FloatField(default=0.0)
+    water_intake_glasses = IntField(default=0)
 
 class User(Document):
     """
@@ -59,6 +69,26 @@ class User(Document):
     weekly_plan = EmbeddedDocumentListField(WorkoutDay)
     workout_history = EmbeddedDocumentListField(WorkoutFeedback)
     workouts_completed = IntField(default=0)
+    
+    # Extended Profile Fields
+    mobile = StringField()
+    dob = DateField()
+    activity_level = StringField(choices=('Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active', 'Super Active'), default='Moderately Active')
+    
+    # Phase 1 Enhancements
+    target_weight = FloatField()
+    diet_preference = StringField(choices=('Vegetarian', 'Non-Vegetarian', 'Vegan', 'Eggetarian', 'Keto', 'Other'), default='Non-Vegetarian')
+    medical_conditions = ListField(StringField(), default=list)
+    allergies = ListField(StringField(), default=list)
+    preferred_workout_type = StringField(choices=('Gym', 'Yoga', 'Home Workout', 'Cardio', 'Calisthenics'), default='Gym')
+    
+    # Tracking Data
+    weight_history = ListField(EmbeddedDocumentField('WeightLog'), default=list)
+    daily_calories_log = ListField(EmbeddedDocumentField('DailyCalorieLog'), default=list)
+    
+    # Password Reset Fields
+    reset_password_token = StringField()
+    reset_password_expiry = DateTimeField()
 
     # --- Gym Owner Specific Fields ---
     gym_name = StringField()
