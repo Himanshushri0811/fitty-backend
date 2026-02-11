@@ -49,8 +49,9 @@ class User(Document):
     email = EmailField(required=True, unique=True)
     username = StringField(required=True, unique=True) # For GymOwners, we can auto-fill this with email part if not provided
     password = StringField(required=True)
-    role = StringField(required=True, default='USER', choices=('USER', 'GYM_OWNER')) 
+    role = StringField(required=True, default='USER', choices=('USER', 'GYM_OWNER', 'ADMIN')) 
     is_active = BooleanField(default=True)
+    last_login = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     
     # Common Profile Fields

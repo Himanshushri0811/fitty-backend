@@ -84,3 +84,79 @@ Give 1-2 sentences of motivating feedback."""
     except Exception as e:
         print(f"Posture Feedback Error: {e}")
         return "Keep your form strict and core engaged!"
+
+def generate_workout_plan_json(user_profile):
+    """
+    Generates a full 7-day workout plan in JSON format based on user profile.
+    """
+    import json
+    
+    if not api_key:
+        return None
+
+    # Construct the Prompt
+    prompt = f"""
+    You are an expert fitness trainer AI named Fitty.
+    Create a personalized 7-day workout plan for this user:
+    
+    - Age: {user_profile.get('age', 'N/A')}
+    - Gender: {user_profile.get('gender', 'N/A')}
+    - Height: {user_profile.get('height', 'N/A')}
+    - Weight: {user_profile.get('weight', 'N/A')}
+    - Goal: {user_profile.get('goal', 'General Fitness')}
+    - Experience Level: {user_profile.get('experience', 'Beginner')}
+    - Equipment Available: {', '.join(user_profile.get('equipment', ['None']))}
+    - Injuries/Limitations: {user_profile.get('injuries', 'None')}
+    - Days Per Week: {user_profile.get('days_available', 7)}
+
+    CRITICAL INSTRUCTIONS:
+    1. Return ONLY valid JSON. No markdown, no explanations.
+    2. The JSON structure must be exactly:
+    {{
+        "plan_name": "Short catchy name for the plan",
+        "goal_summary": "Brief explanation of why this plan works",
+        "days": [
+            {{
+                "day_name": "Monday",
+                "focus_area": "Chest & Triceps",
+                "exercises": [
+                    {{
+                        "name": "Exercise Name",
+                        "sets": 3,
+                        "reps": "12",
+                        "rest": 60,
+                        "notes": "Tip for form"
+                    }}
+                ]
+            }},
+            ... (for all 7 days, use 'Rest' for rest days)
+        ]
+    }}
+    3. Ensure exercises match the equipment available.
+    4. Vary the rep ranges based on the goal (e.g., lower reps for strength, higher for endurance).
+    5. Include 7 days explicitly (Monday to Sunday).
+    """
+
+    # Dynamic Model Selection
+    from .model_selector import get_best_gemini_model
+    best_model = get_best_gemini_model()
+    
+    # Configure generation based on model capabilities
+    gen_config = {}
+    if "gemini-1.5" in best_model or "gemini-2.0" in best_model or "gemini-2.5" in best_model:
+         gen_config = {"response_mime_type": "application/json"}
+
+    try:
+        model = genai.GenerativeModel(
+            model_name=best_model, 
+            generation_config=gen_config
+        )
+        response = model.generate_content(prompt)
+        
+        # Parse JSON
+        plan_data = json.loads(response.text)
+        return plan_data
+        
+    except Exception as e:
+        print(f"Workout Generation Error: {e}")
+        return None

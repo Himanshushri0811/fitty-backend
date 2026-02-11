@@ -2,13 +2,12 @@ import google.generativeai as genai
 import os
 from django.conf import settings
 
-# List of models to try in order of preference (Newest to Oldest)
+# List of models to try in order of preference (Available to this API Key)
 CANDIDATE_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-001",
-    "gemini-1.5-flash",
-    "gemini-pro"
+    "gemini-2.5-pro"
 ]
 
 _working_model = None
