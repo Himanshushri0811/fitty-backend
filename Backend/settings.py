@@ -1,5 +1,9 @@
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Load .env explicitly
+load_dotenv()
 from datetime import timedelta
 
 # --------------------------------------------------
@@ -42,7 +46,33 @@ INSTALLED_APPS = [
     "explore",
     "social",
     "diet",
+    "workouts",
+    "cloudinary_storage",
+    "cloudinary",
 ]
+
+# --------------------------------------------------
+# CLOUDINARY STORAGE
+# --------------------------------------------------
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': os.getenv('CLOUD_NAME'),
+    'API_KEY': os.getenv('API_KEY'),
+    'API_SECRET': os.getenv('API_SECRET'),
+}
+
+# Global Cloudinary Config (for direct library usage if needed)
+import cloudinary
+
+print(f"DEBUG: Loading Cloudinary Config... Cloud Name: {os.getenv('CLOUD_NAME')}")
+
+cloudinary.config( 
+  cloud_name = os.getenv('CLOUD_NAME'), 
+  api_key = os.getenv('API_KEY'), 
+  api_secret = os.getenv('API_SECRET'),
+  secure = True
+)
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware", # CORS FIRST

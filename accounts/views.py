@@ -148,8 +148,14 @@ class SignupAPIView(APIView):
             name = data.get('name', '').strip()
             
             # Determine role
-            role = data.get('role')
-            if not role:
+            # Determine role
+            role = data.get('role', 'USER')
+            
+            # Security: Prevent unauthorized Admin creation via API
+            if role == 'ADMIN':
+                return Response({'error': 'Admin accounts cannot be created via Signup API.'}, status=403)
+                
+            if not role or role not in ['USER', 'GYM_OWNER']:
                 if 'gym_name' in data or 'gym-owner' in request.path:
                     role = 'GYM_OWNER'
                 else:
@@ -643,3 +649,56 @@ class WorkoutExplanationAPI(APIView):
              explanation = f"Since your goal is {goal}, today's focus on {today_workout.focus} is designed to optimize your progress!"
         
         return Response({'explanation': explanation})
+
+class AdminUserListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', 'USER') != 'ADMIN':
+            return Response({"error": "Admin access required"}, status=403)
+            
+        users = User.objects.all().order_by('-created_at')
+        data = []
+        for u in users:
+            data.append({
+                "id": str(u.id),
+                "name": u.name or u.username,
+                "email": u.email,
+                "role": u.role,
+                "status": "Active" if u.is_active else "Blocked",
+                "last_login": u.last_login.strftime("%Y-%m-%d %H:%M") if hasattr(u, 'last_login') and u.last_login else "Never",
+                "created_at": u.created_at.strftime("%Y-%m-%d")
+            })
+            
+        return Response(data)
+
+class AdminUserRoleView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def put(self, request, id):
+        if getattr(request.user, 'role', 'USER') != 'ADMIN':
+            return Response({"error": "Admin access required"}, status=403)
+            
+        u = User.objects(id=id).first()
+        if not u:
+            return Response({"error": "User not found"}, status=404)
+            
+        action = request.data.get('action') # 'change_role', 'toggle_status', 'delete'
+        
+        if action == 'change_role':
+            new_role = request.data.get('role')
+            if new_role in ['USER', 'GYM_OWNER', 'ADMIN']:
+                u.role = new_role
+                u.save()
+            else:
+                return Response({"error": "Invalid role"}, status=400)
+                
+        elif action == 'toggle_status':
+            u.is_active = not u.is_active
+            u.save()
+            
+        elif action == 'delete':
+            u.delete()
+            return Response({"success": True, "message": "User deleted"})
+            
+        return Response({"success": True})
