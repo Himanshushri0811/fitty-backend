@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
-DEBUG = os.getenv("DEBUG", "True") == "True" # Default to True for dev convenience
+DEBUG = os.getenv("DEBUG", "False") == "True" # Default to False for production safety
 
 # Production Security & Proxy Configuration (Render)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -26,7 +26,11 @@ SECURE_SSL_REDIRECT = False  # Render handles SSL termination
 # --------------------------------------------------
 # CORE CONFIG
 # --------------------------------------------------
-ALLOWED_HOSTS = ["*"] # Allow all for Render dynamic IPs/Domains
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    ".onrender.com"
+]
 
 INSTALLED_APPS = [
     # Minimal Django services
@@ -151,8 +155,21 @@ if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 else:
     CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "https://fitmitra.onrender.com").split(",")
-    CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://fitmitra.onrender.com").split(",")
+
+CORS_ALLOWED_ORIGINS = [
+    "https://fitty-ai.netlify.app"
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://fitty-ai.netlify.app",
+    "https://fitmitra-backend.onrender.com"
+]
+
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+
+CSRF_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SAMESITE = "None"
 
 # --------------------------------------------------
 # URLS & WSGI

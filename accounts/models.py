@@ -51,6 +51,8 @@ class User(Document):
     password = StringField(required=True)
     role = StringField(required=True, default='USER', choices=('USER', 'GYM_OWNER', 'ADMIN')) 
     is_active = BooleanField(default=True)
+    is_staff = BooleanField(default=False)
+    is_superuser = BooleanField(default=False)
     last_login = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     

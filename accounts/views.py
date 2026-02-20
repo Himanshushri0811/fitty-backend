@@ -5,6 +5,8 @@ from .models import User, GymOwner, WorkoutDay, WorkoutExercise, WorkoutFeedback
 from .authentication import generate_jwt
 # import razorpay (Moved to inside method to prevent pkg_resources startup crash)
 from django.conf import settings
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime
 import mongoengine
 from mongoengine.queryset.visitor import Q
@@ -139,6 +141,7 @@ class HealthCheckView(APIView):
         except Exception as e:
             return Response({"mongo": "error", "message": str(e)}, status=503)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class SignupAPIView(APIView):
     def post(self, request):
         try:
@@ -228,6 +231,7 @@ class SignupAPIView(APIView):
             return Response({'error': 'Internal Server Error. Please contact support.'}, status=500)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LoginAPIView(APIView):
     def post(self, request):
         identifier = request.data.get('username', '').strip().lower()
