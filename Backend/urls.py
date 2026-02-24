@@ -3,7 +3,7 @@ from accounts.views import HealthCheckView
 
 urlpatterns = [
     # path("admin/", admin.site.urls), # Disabled in Pure Mongo
-    path("api/health/db/", HealthCheckView.as_view(), name='db_health'),
+    path("api/health/", HealthCheckView.as_view(), name='health'),
     path("api/accounts/", include("accounts.urls")),
     path("api/ai/", include("ai.urls")),
     path("api/explore/", include("explore.urls")),

@@ -133,13 +133,13 @@ class ResetPasswordAPIView(APIView):
         return Response({'message': 'Password reset successfully'})
 
 
+from rest_framework.permissions import AllowAny
+
+@method_decorator(csrf_exempt, name='dispatch')
 class HealthCheckView(APIView):
+    permission_classes = [AllowAny]
     def get(self, request):
-        try:
-            mongoengine.get_db().command('ping')
-            return Response({"mongo": "connected", "status": "ok"})
-        except Exception as e:
-            return Response({"mongo": "error", "message": str(e)}, status=503)
+        return Response({"status": "ok"})
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SignupAPIView(APIView):
@@ -234,36 +234,40 @@ class SignupAPIView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class LoginAPIView(APIView):
     def post(self, request):
-        identifier = request.data.get('username', '').strip().lower()
-        password = request.data.get('password')
+        try:
+            identifier = request.data.get('username', '').strip().lower()
+            password = request.data.get('password')
 
-        if not identifier or not password:
-            return Response({'error': 'Credentials required'}, status=400)
+            if not identifier or not password:
+                return Response({'error': 'Credentials required'}, status=400)
 
-        # Unified Login Logic
-        # Case-insensitive search requires regex or collation, but here we enforce lower on input.
-        # If we stored mixed case, we'd need __iexact.
-        # We used __iexact to be safe.
-        user = User.objects(Q(email__iexact=identifier) | Q(username__iexact=identifier)).first()
+            # Unified Login Logic
+            # Case-insensitive search requires regex or collation, but here we enforce lower on input.
+            # If we stored mixed case, we'd need __iexact.
+            # We used __iexact to be safe.
+            user = User.objects(Q(email__iexact=identifier) | Q(username__iexact=identifier)).first()
 
-        if not user or not user.check_password(password):
-            return Response({'error': 'Invalid Credentials'}, status=401)
+            if not user or not user.check_password(password):
+                return Response({'error': 'Invalid Credentials'}, status=401)
 
-        tokens = generate_jwt(user)
-        
-        return Response({
-            'user': {
-                'email': user.email,
-                'role': user.role,
-                'id': str(user.id),
-                'name': user.name if user.name else getattr(user, 'gym_name', user.username),
-                'username': user.username,
-                'gym_name': getattr(user, 'gym_name', None),
-                'plan': getattr(user, 'plan_type', 'FREE')
-            },
-            'access': tokens['access'],
-            'refresh': tokens['refresh']
-        })
+            tokens = generate_jwt(user)
+            
+            return Response({
+                'user': {
+                    'email': user.email,
+                    'role': user.role,
+                    'id': str(user.id),
+                    'name': user.name if user.name else getattr(user, 'gym_name', user.username),
+                    'username': user.username,
+                    'gym_name': getattr(user, 'gym_name', None),
+                    'plan': getattr(user, 'plan_type', 'FREE')
+                },
+                'access': tokens['access'],
+                'refresh': tokens['refresh']
+            })
+        except Exception as e:
+            logger.error(f"Login Error: {str(e)}", exc_info=True)
+            return Response({'error': 'Internal Server Error. Please try again.', 'details': str(e)}, status=500)
 
 from rest_framework import status, permissions
 
