@@ -1,7 +1,12 @@
 from django.urls import path, include
 from accounts.views import HealthCheckView
+from django.http import JsonResponse
+
+def minimal_health(request):
+    return JsonResponse({"status": "minimal_ok", "note": "direct_from_urls"})
 
 urlpatterns = [
+    path("", minimal_health), # Extremely minimal root check
     # path("admin/", admin.site.urls), # Disabled in Pure Mongo
     path("api/health/", HealthCheckView.as_view(), name='health'),
     path("api/accounts/", include("accounts.urls")),
@@ -15,7 +20,6 @@ urlpatterns = [
     path('api/diet/', include('diet.urls')),
     path('api/subscriptions/', include('subscriptions.urls')),
     path('api/workouts/', include('workouts.urls')),
-
 ]
 
 # Serve media files in development
