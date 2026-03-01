@@ -1,49 +1,56 @@
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
-
-# Load .env explicitly
-load_dotenv()
 from datetime import timedelta
 
 # --------------------------------------------------
-# BASE & BOOTSTRAP
+# LOAD ENV
 # --------------------------------------------------
+load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Security
+# --------------------------------------------------
+# SECURITY CORE
+# --------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
-DEBUG = os.getenv("DEBUG", "False") == "True" # Default to False for production safety
+DEBUG = os.getenv("DEBUG", "False") == "True"
 
-# Production Security & Proxy Configuration (Render)
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-USE_X_FORWARDED_HOST = True
-SECURE_SSL_REDIRECT = False  # Render handles SSL termination
-
-# --------------------------------------------------
-# CORE CONFIG
-# --------------------------------------------------
-# --------------------------------------------------
-# CORE CONFIG
-# --------------------------------------------------
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    ".onrender.com"
+    "fitmitra-backend.onrender.com",
+    ".onrender.com",
 ]
 
+# --------------------------------------------------
+# HTTPS / PROXY (RENDER SAFE)
+# --------------------------------------------------
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+SECURE_SSL_REDIRECT = True
+
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+
+# --------------------------------------------------
+# APPS
+# --------------------------------------------------
 INSTALLED_APPS = [
-    # Minimal Django services
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
-    
-    # Third-party
+
     "rest_framework",
     "corsheaders",
-    
-    # Local Apps
-    "common",  # Core app first for database init
+
+    "common",
     "accounts",
     "gym_management",
     "ai",
@@ -51,102 +58,83 @@ INSTALLED_APPS = [
     "social",
     "diet",
     "workouts",
-    "cloudinary_storage",
+
     "cloudinary",
+    "cloudinary_storage",
 ]
 
 # --------------------------------------------------
-# CLOUDINARY STORAGE
+# MIDDLEWARE (JWT ONLY – NO CSRF)
 # --------------------------------------------------
-CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.getenv('CLOUD_NAME'),
-    'API_KEY': os.getenv('API_KEY'),
-    'API_SECRET': os.getenv('API_SECRET'),
-}
-
-# Global Cloudinary Config (for direct library usage if needed)
-import cloudinary
-
-print(f"DEBUG: Loading Cloudinary Config... Cloud Name: {os.getenv('CLOUD_NAME')}")
-
-cloudinary.config( 
-  cloud_name = os.getenv('CLOUD_NAME'), 
-  api_key = os.getenv('API_KEY'), 
-  api_secret = os.getenv('API_SECRET'),
-  secure = True
-)
-
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware", # CORS FIRST
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    # Note: Sessions and default Auth middleware removed for Pure NoSQL JWT
 ]
 
 # --------------------------------------------------
-# PURE NOSQL ENFORCEMENT
+# DATABASE (NO SQL – PURE MONGO)
 # --------------------------------------------------
-# Dummy default to satisfy Django core, but no SQL table will ever be created.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.dummy', 
+    "default": {
+        "ENGINE": "django.db.backends.dummy",
     }
 }
 
 # --------------------------------------------------
-# MONGOENGINE CONNECTION (Production-Grade)
+# MONGOENGINE CONNECTION
 # --------------------------------------------------
 import mongoengine
-import sys
 
-_MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("MONGO_URI")
 
-if not _MONGO_URI:
-    # Fail hard if DB is not configured
-    print("❌ CRITICAL: MONGO_URI is missing from environment variables.")
-    if os.getenv("DJANGO_ENV") == "production":
+if not MONGO_URI:
+    print("❌ MONGO_URI missing")
+    if not DEBUG:
         sys.exit(1)
-if "test" not in sys.argv: # Avoid connecting during test runner setup if separate
-    # Only connect in the main process to avoid double connection during autoreload
-    if os.environ.get('RUN_MAIN') == 'true' or not os.environ.get('RUN_MAIN'):
-        try:
-            mongoengine.connect(
-                host=_MONGO_URI, 
-                alias='default', 
-                uuidRepresentation='standard'
-            )
-            print("✅ MongoEngine: Registered default connection.")
-        except Exception as e:
-            print(f"❌ MongoEngine Connection Error: {e}")
-            # In production, we can't run without DB
-            if not DEBUG:
-                sys.exit(1)
+
+if "test" not in sys.argv:
+    try:
+        mongoengine.connect(
+            host=MONGO_URI,
+            alias="default",
+            uuidRepresentation="standard"
+        )
+        print("✅ MongoDB Connected")
+    except Exception as e:
+        print("❌ MongoDB Error:", e)
+        if not DEBUG:
+            sys.exit(1)
 
 # --------------------------------------------------
-# AUTHENTICATION & SECURITY
+# REST FRAMEWORK (JWT AUTH)
 # --------------------------------------------------
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'accounts.authentication.MongoJWTAuthentication',
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "accounts.authentication.MongoJWTAuthentication",
     ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.AllowAny', # Default open, secure specific views
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",
     ),
 }
 
-CORS_ALLOW_CREDENTIALS = True
+# --------------------------------------------------
+# CORS (NETLIFY → RENDER)
+# --------------------------------------------------
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    "https://fitty-ai.netlify.app",
+]
+
+CORS_ALLOW_CREDENTIALS = False
+
 CORS_ALLOW_HEADERS = [
     "accept",
     "authorization",
     "content-type",
     "origin",
     "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
 ]
 
 CORS_ALLOW_METHODS = [
@@ -158,40 +146,46 @@ CORS_ALLOW_METHODS = [
     "OPTIONS",
 ]
 
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-else:
-    CORS_ALLOW_ALL_ORIGINS = False
+# --------------------------------------------------
+# CLOUDINARY
+# --------------------------------------------------
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": os.getenv("CLOUD_NAME"),
+    "API_KEY": os.getenv("API_KEY"),
+    "API_SECRET": os.getenv("API_SECRET"),
+}
 
-CORS_ALLOWED_ORIGINS = [
-    "https://fitty-ai.netlify.app"
-]
+import cloudinary
+cloudinary.config(
+    cloud_name=os.getenv("CLOUD_NAME"),
+    api_key=os.getenv("API_KEY"),
+    api_secret=os.getenv("API_SECRET"),
+    secure=True
+)
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://fitty-ai.netlify.app",
-    "https://fitmitra-backend.onrender.com"
-]
-
-CSRF_COOKIE_SECURE = True
-SESSION_COOKIE_SECURE = True
-
-CSRF_COOKIE_SAMESITE = "None"
-SESSION_COOKIE_SAMESITE = "None"
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # --------------------------------------------------
-# URLS & WSGI
+# STATIC
+# --------------------------------------------------
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# --------------------------------------------------
+# URL / WSGI
 # --------------------------------------------------
 ROOT_URLCONF = "Backend.urls"
 WSGI_APPLICATION = "Backend.wsgi.application"
 
+# --------------------------------------------------
+# TEMPLATES
+# --------------------------------------------------
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
-                "django.template.context_processors.debug",
                 "django.template.context_processors.request",
             ],
         },
@@ -199,15 +193,7 @@ TEMPLATES = [
 ]
 
 # --------------------------------------------------
-# STORAGE
-# --------------------------------------------------
-STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
-
-# --------------------------------------------------
-# EXTRA SETTINGS
+# GLOBAL
 # --------------------------------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 APPEND_SLASH = False
@@ -216,23 +202,13 @@ TIME_ZONE = "Asia/Kolkata"
 USE_I18N = True
 USE_TZ = True
 
-# Payment Integration (Razorpay)
-RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-
 # --------------------------------------------------
-# EMAIL CONFIGURATION (SMTP)
+# EMAIL (SMTP)
 # --------------------------------------------------
-
-# STRICTLY use SMTP by default.
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_USE_SSL = False  # Explicitly False for port 587
-
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "FitMitra Support <fitmitra11@gmail.com>")
-
-print(f"✅ EMAIL SYSTEM: Using SMTP EmailBackend for {EMAIL_HOST_USER} (TLS=True)")
+DEFAULT_FROM_EMAIL = "Fitty Support <fitmitra11@gmail.com>"
