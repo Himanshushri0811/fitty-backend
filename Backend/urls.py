@@ -2,6 +2,7 @@ from django.urls import path, include
 from accounts.views import HealthCheckView
 
 urlpatterns = [
+    path("", HealthCheckView.as_view(), name='root-health'), # Root health check
     # path("admin/", admin.site.urls), # Disabled in Pure Mongo
     path("api/health/", HealthCheckView.as_view(), name='health'),
     path("api/accounts/", include("accounts.urls")),
@@ -15,7 +16,6 @@ urlpatterns = [
     path('api/diet/', include('diet.urls')),
     path('api/subscriptions/', include('subscriptions.urls')),
     path('api/workouts/', include('workouts.urls')),
-
 ]
 
 # Serve media files in development
