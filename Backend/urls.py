@@ -1,8 +1,12 @@
 from django.urls import path, include
 from accounts.views import HealthCheckView
+from django.http import JsonResponse
+
+def minimal_health(request):
+    return JsonResponse({"status": "minimal_ok", "note": "direct_from_urls"})
 
 urlpatterns = [
-    path("", HealthCheckView.as_view(), name='root-health'), # Root health check
+    path("", minimal_health), # Extremely minimal root check
     # path("admin/", admin.site.urls), # Disabled in Pure Mongo
     path("api/health/", HealthCheckView.as_view(), name='health'),
     path("api/accounts/", include("accounts.urls")),
