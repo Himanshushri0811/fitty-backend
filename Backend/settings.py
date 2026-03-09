@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import sys
+import logging
 from dotenv import load_dotenv
 from datetime import timedelta
 
@@ -22,6 +23,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "fitmitra-backend.onrender.com",
     ".onrender.com",
+    "fitmitra.onrender.com",
 ]
 
 # --------------------------------------------------
@@ -99,13 +101,17 @@ if "test" not in sys.argv:
         mongoengine.connect(
             host=MONGO_URI,
             alias="default",
-            uuidRepresentation="standard"
+            uuidRepresentation="standard",
+            connectTimeoutMS=5000,
+            serverSelectionTimeoutMS=5000
         )
-        print("✅ MongoDB Connected")
+        print("✅ MongoDB Connected Successfully")
     except Exception as e:
-        print("❌ MongoDB Error:", e)
-        if not DEBUG:
-            sys.exit(1)
+        print(f"❌ MongoDB Connection Error: {e}")
+        # In production, we don't exit(1) immediately to allow health checks
+        # and logs to be visible on Render. Instead, we log the failure.
+        logger = logging.getLogger(__name__)
+        logger.critical(f"FATAL: Could not connect to MongoDB: {e}")
 
 # --------------------------------------------------
 # REST FRAMEWORK (JWT AUTH)
@@ -166,10 +172,19 @@ cloudinary.config(
 DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # --------------------------------------------------
-# STATIC
+# RAZORPAY / GEMINI (MISSING IN ORIGINAL)
+# --------------------------------------------------
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# --------------------------------------------------
+# STATIC / WHITENOISE
 # --------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+WHITENOISE_MANIFEST_STRICT = False  # Prevent 500 if static file missing
+WHITENOISE_USE_FINDERS = True
 
 # --------------------------------------------------
 # URL / WSGI
