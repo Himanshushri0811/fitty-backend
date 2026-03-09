@@ -213,7 +213,16 @@ class SignupAPIView(APIView):
                 user.gender = data.get('gender', '')
                 user.mobile = data.get('mobile', '')
                 user.dob = data.get('dob') # Ensure format YYYY-MM-DD or parse it
-                user.activity_level = data.get('activity_level', 'Moderately Active')
+                
+                # Activity Level Mapping (Frontend Terminology to Backend Choices)
+                raw_activity = data.get('activity_level', 'Beginner')
+                activity_map = {
+                    'Beginner': 'Moderately Active',
+                    'Intermediate': 'Very Active',
+                    'Advanced': 'Super Active'
+                }
+                user.activity_level = activity_map.get(raw_activity, raw_activity)
+                
                 user.fitness_level = data.get('fitness_level', 'Beginner')
                 
                 try:

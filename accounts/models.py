@@ -76,7 +76,7 @@ class User(Document):
     # Extended Profile Fields
     mobile = StringField()
     dob = DateField()
-    activity_level = StringField(choices=('Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active', 'Super Active'), default='Moderately Active')
+    activity_level = StringField(choices=('Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active', 'Super Active', 'Beginner', 'Intermediate', 'Advanced'), default='Moderately Active')
     
     # Phase 1 Enhancements
     target_weight = FloatField()
