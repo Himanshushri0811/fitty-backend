@@ -184,7 +184,8 @@ class SignupAPIView(APIView):
                     counter += 1
 
             # Check Global Uniqueness (Single Source of Truth)
-            if User.objects(Q(email=email) | Q(username=username)).first():
+            existing_user = User.objects(Q(email=email) | Q(username=username)).first()
+            if existing_user:
                 return Response({'error': 'Email or Username already taken'}, status=400)
 
             # Create User
@@ -200,19 +201,40 @@ class SignupAPIView(APIView):
                 user.gym_address = data.get('gym_address', '')
             else:
                 user.goal = data.get('goal', '')
-                if data.get('age'): user.age = int(data.get('age'))
+                
+                # Robust numeric parsing to prevent ValueError crash
+                try:
+                    age_val = data.get('age')
+                    if age_val is not None and str(age_val).strip():
+                        user.age = int(float(age_val)) # Handle float strings too
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid age provided: {data.get('age')}")
+                
                 user.gender = data.get('gender', '')
                 user.mobile = data.get('mobile', '')
                 user.dob = data.get('dob') # Ensure format YYYY-MM-DD or parse it
                 user.activity_level = data.get('activity_level', 'Moderately Active')
                 user.fitness_level = data.get('fitness_level', 'Beginner')
-                if data.get('height'): user.height = float(data.get('height'))
-                if data.get('weight'): user.weight = float(data.get('weight'))
+                
+                try:
+                    height_val = data.get('height')
+                    if height_val is not None and str(height_val).strip():
+                        user.height = float(height_val)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid height provided: {data.get('height')}")
+
+                try:
+                    weight_val = data.get('weight')
+                    if weight_val is not None and str(weight_val).strip():
+                        user.weight = float(weight_val)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid weight provided: {data.get('weight')}")
 
             user.set_password(password)
             user.save()
 
             tokens = generate_jwt(user)
+
             return Response({
                 'user': {
                     'email': user.email, 
@@ -227,8 +249,12 @@ class SignupAPIView(APIView):
                 'refresh': tokens['refresh']
             }, status=201)
         except Exception as e:
-            logger.error(f"Signup Error: {str(e)}", exc_info=True)
-            return Response({'error': 'Internal Server Error. Please contact support.'}, status=500)
+            logger.error(f"Signup Error Traceback: ", exc_info=True)
+            return Response({
+                'error': 'Internal Server Error. Check server logs.',
+                'details': str(e),
+                'type': type(e).__name__
+            }, status=500)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
