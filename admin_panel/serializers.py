@@ -35,3 +35,15 @@ class LoginLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = LoginLog
         fields = ['id', 'username', 'ip_address', 'user_agent', 'timestamp']
+
+class AdminPostSerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    username = serializers.CharField()
+    content = serializers.CharField()
+    image_url = serializers.CharField(required=False, allow_null=True)
+    likes_count = serializers.SerializerMethodField()
+    comments_count = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+
+    def get_likes_count(self, obj):
+        return len(obj.likes) if obj.likes else 0

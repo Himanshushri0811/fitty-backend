@@ -8,15 +8,15 @@ from datetime import timedelta
 # --------------------------------------------------
 # LOAD ENV
 # --------------------------------------------------
-load_dotenv()
+load_dotenv(override=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --------------------------------------------------
 # SECURITY CORE
 # --------------------------------------------------
-SECRET_KEY = os.getenv("SECRET_KEY", "fitmitra-prod-secret-2024")
-DEBUG = os.getenv("DEBUG", "False") == "True"
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fitmitra-fallback-key-2024")
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
     "localhost",
@@ -56,10 +56,11 @@ INSTALLED_APPS = [
     "accounts",
     "gym_management",
     "ai",
-    "explore",
+    "missions",
     "social",
     "diet",
     "workouts",
+    "fitty_ai",
 
     "cloudinary",
     "cloudinary_storage",
@@ -179,6 +180,7 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # --------------------------------------------------
 # STATIC / WHITENOISE

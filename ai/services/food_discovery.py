@@ -1,15 +1,12 @@
-import google.generativeai as genai
-import json
 import os
+import json
+from google import genai
 from django.conf import settings
 from diet.models import FoodItem
+from ai.services.model_selector import get_best_gemini_model
 
 # Configure API (Reuse existing setup)
 api_key = os.getenv("GEMINI_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
-if api_key:
-    genai.configure(api_key=api_key)
-
-from ai.services.model_selector import get_best_gemini_model
 
 def discover_new_foods(goal, diet_type):
     """
@@ -51,18 +48,21 @@ def discover_new_foods(goal, diet_type):
     """
     
     try:
-        model = genai.GenerativeModel(MODEL_NAME, generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json"
+            }
+        )
+        
         foods = json.loads(response.text)
         
         saved_count = 0
         for f in foods:
             # Check duplicate
             if not FoodItem.objects(name__iexact=f['name']).first():
-                # Use a reliable placeholder or simple image service for now
-                # Unsplash source API is deprecated/unreliable without key
-                # We use a nice text placeholder that looks like a UI element
-                
                 safe_name = f['name'].replace(' ', '+')
                 image_url = f"https://placehold.co/600x400/2a2a35/FFF?text={safe_name}"
                 
@@ -76,15 +76,14 @@ def discover_new_foods(goal, diet_type):
                     benefits=f.get('benefits', []),
                     fitness_relevance=f.get('fitness_relevance', ''),
                     type=diet_type, 
-                    # Default tags
                     goal_tags=[goal],
                     image_url=image_url
                 ).save()
                 saved_count += 1
                 
         print(f"✅ AI Discovered & Saved {saved_count} new foods.")
-        return foods # Return just to confirm success, though we fetched from DB mostly
+        return foods
         
     except Exception as e:
-        print(f"Gemini Discovery Error: {e}")
+        print(f"Gemini Discovery Error (food_discovery.py): {e}")
         return []

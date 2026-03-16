@@ -1,24 +1,34 @@
-
-import google.generativeai as genai
-from django.conf import settings
 import os
+from google import genai
+from django.conf import settings
 
-def get_gemini_response(prompt):
+def generate_fitty_response(user_message):
     """
-    Get response from Gemini Flash model
+    Generate a response from Fitty AI using the new Google GenAI SDK.
+    Model: gemini-2.0-flash
     """
     try:
+        # 1. Get API Key from settings or environment
         api_key = getattr(settings, 'GEMINI_API_KEY', os.getenv('GEMINI_API_KEY'))
         if not api_key:
-            return "AI Configuration Missing (API Key)"
-            
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
+            return "❌ Fitty is having trouble connecting: API Key missing."
+
+        # 2. Initialize the client using the new SDK
+        client = genai.Client(api_key=api_key)
+
+        # 3. Generate response using gemini-2.0-flash
+        # This model is faster and supports the latest features without 404/v1beta issues
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=user_message,
+        )
+
         return response.text
+
     except Exception as e:
-        print(f"Gemini Error: {e}")
-        return "I am currently unable to connect to the AI brain. However, this workout is scientifically structured for your goals."
+        print(f"🔴 Fitty AI Error (utils.py): {str(e)}")
+        # Friendly error message for users
+        return "I'm having a small brain freeze right now, Champ. Let's try that again in a second! Keep the energy up!"
 
 def detect_query_intent(query):
     """

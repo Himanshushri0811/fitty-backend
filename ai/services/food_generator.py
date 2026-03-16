@@ -1,29 +1,23 @@
-import google.generativeai as genai
-import json
 import os
+import json
 import requests
-import traceback
+from google import genai
 from django.conf import settings
+from ai.services.model_selector import get_best_gemini_model
 
 # --- API KEYS ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or getattr(settings, 'GEMINI_API_KEY', None)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or getattr(settings, 'GROQ_API_KEY', None)
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-from ai.services.model_selector import get_best_gemini_model
-
 # --- HELPER: ROBUST GENERATION ---
 def generate_robust_json(prompt, error_context="Generation"):
     """
-    Tries Gemini first, then falls back to Groq Llama3.
+    Tries Gemini first (updated SDK), then falls back to Groq Llama3.
     """
     
-    # 1. Try Groq (PRIORITY due to Gemini issues)
+    # 1. Try Groq (PRIORITY due to previous Gemini instability)
     if GROQ_API_KEY:
         try:
-            # print("🚀 Calling Groq (llama-3.3-70b-versatile)...")
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -42,28 +36,25 @@ def generate_robust_json(prompt, error_context="Generation"):
             if resp.status_code == 200:
                 content = resp.json()['choices'][0]['message']['content']
                 return json.loads(content)
-            else:
-                pass
-                # print(f"❌ Groq API Error: {resp.text}")
-        except Exception as e:
+        except Exception:
             pass
-            # print(f"❌ Groq Exception: {e}")
 
-    # 2. Try Gemini (Fallback)
+    # 2. Try Gemini (Fallback - New SDK)
     if GEMINI_API_KEY:
         try:
             model_name = get_best_gemini_model()
-            # print(f"🤖 Trying Gemini ({model_name})...") 
-            model = genai.GenerativeModel(model_name, generation_config={"response_mime_type": "application/json"})
-            response = model.generate_content(prompt)
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json"
+                }
+            )
             return json.loads(response.text)
         except Exception as e:
-            pass
-            # print(f"⚠️ Gemini Failed in {error_context}: {e}")
-            # Continue to fail
+            print(f"⚠️ Gemini Failed in {error_context}: {e}")
 
-    # 3. Fail
-    # print(f"❌ All AI Providers failed for {error_context}")
     return None
 
 # --- PUBLIC FUNCTIONS ---

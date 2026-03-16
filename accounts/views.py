@@ -12,7 +12,7 @@ import mongoengine
 from mongoengine.queryset.visitor import Q
 import random
 from .workout_plans import DEFAULT_WORKOUT_PLANS
-from ai.utils import get_gemini_response # Assuming this exists or similar util
+from ai.utils import generate_fitty_response # Updated to use the new Gemini SDK function
 import os
 import logging
 
@@ -687,7 +687,7 @@ class WorkoutExplanationAPI(APIView):
         """
         
         try:
-            explanation = get_gemini_response(prompt)
+            explanation = generate_fitty_response(prompt)
         except:
              explanation = f"Since your goal is {goal}, today's focus on {today_workout.focus} is designed to optimize your progress!"
         

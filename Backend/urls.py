@@ -11,7 +11,7 @@ urlpatterns = [
     path("api/health/", HealthCheckView.as_view(), name='health'),
     path("api/accounts/", include("accounts.urls")),
     path("api/ai/", include("ai.urls")),
-    path("api/explore/", include("explore.urls")),
+    path("api/missions/", include("missions.urls")),
     # path("api/admin-panel/", include("admin_panel.urls")),
     path('api/support/', include('support.urls')),
     path('api/social/', include('social.urls')),
@@ -20,6 +20,7 @@ urlpatterns = [
     path('api/diet/', include('diet.urls')),
     path('api/subscriptions/', include('subscriptions.urls')),
     path('api/workouts/', include('workouts.urls')),
+    path('api/fitty-ai/', include('fitty_ai.urls')),
 ]
 
 # Serve media files in development
