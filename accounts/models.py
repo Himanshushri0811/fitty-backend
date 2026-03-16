@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField, DateField, EmbeddedDocumentField
+from mongoengine import Document, StringField, EmailField, DateTimeField, BooleanField, IntField, FloatField, DecimalField, EmbeddedDocument, EmbeddedDocumentListField, ListField, DateField, EmbeddedDocumentField, ReferenceField
 from datetime import datetime
 from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
@@ -92,6 +92,10 @@ class User(Document):
     # Password Reset Fields
     reset_password_token = StringField()
     reset_password_expiry = DateTimeField()
+
+    # Social Fields
+    followers = ListField(ReferenceField('self'), default=list)
+    following = ListField(ReferenceField('self'), default=list)
 
     # --- Gym Owner Specific Fields ---
     gym_name = StringField()

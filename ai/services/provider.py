@@ -1,6 +1,6 @@
 import os
-import google.generativeai as genai
 import requests
+from google import genai
 from django.conf import settings
 from .context_builder import build_system_context
 
@@ -9,9 +9,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or getattr(settings, 'GEMINI_API_KE
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or getattr(settings, 'GROQ_API_KEY', None)
 
 # Models
-# Models
-GEMINI_MODEL_STABLE = "gemini-1.5-flash" # Stable Free Tier
-GROQ_MODEL = "llama-3.3-70b-versatile" # Updated Stable Model
+GEMINI_MODEL_STABLE = "gemini-2.0-flash" 
+GROQ_MODEL = "llama-3.3-70b-versatile" 
 
 class AIProvider:
     def generate(self, session, message, user):
@@ -19,15 +18,16 @@ class AIProvider:
 
 class GeminiProvider(AIProvider):
     def __init__(self):
-        if GEMINI_API_KEY:
-            genai.configure(api_key=GEMINI_API_KEY)
+        self.api_key = GEMINI_API_KEY
         self.model_name = GEMINI_MODEL_STABLE
 
     def generate(self, session, message, user):
-        if not GEMINI_API_KEY:
+        if not self.api_key:
             raise ValueError("Gemini API Key missing")
 
         try:
+            client = genai.Client(api_key=self.api_key)
+            
             # Context
             sys_prompt = build_system_context(user)
             
@@ -37,11 +37,17 @@ class GeminiProvider(AIProvider):
                 if msg.role in ['user', 'model']:
                     history.append({
                         "role": "user" if msg.role == "user" else "model",
-                        "parts": [msg.content]
+                        "parts": [{"text": msg.content}]
                     })
             
-            model = genai.GenerativeModel(self.model_name, system_instruction=sys_prompt)
-            chat = model.start_chat(history=history)
+            chat = client.chats.create(
+                model=self.model_name,
+                config={
+                    "system_instruction": sys_prompt,
+                },
+                history=history
+            )
+            
             response = chat.send_message(message)
             return response.text.strip()
             

@@ -4,12 +4,14 @@ from .views import (
     AdminDashboardStatsView, 
     AdminUserViewSet, 
     AdminGymViewSet, 
-    AdminActionListView
+    AdminActionListView,
+    AdminPostViewSet
 )
 
 router = SimpleRouter()
 router.register(r'users', AdminUserViewSet, basename='admin-users')
 router.register(r'gyms', AdminGymViewSet, basename='admin-gyms')
+router.register(r'posts', AdminPostViewSet, basename='admin-posts')
 
 urlpatterns = [
     path('', include(router.urls)),

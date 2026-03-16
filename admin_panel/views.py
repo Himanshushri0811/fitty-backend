@@ -1,9 +1,9 @@
 from rest_framework import viewsets, permissions, status, views
 from rest_framework.response import Response
 from django.contrib.auth.models import User
-from explore.models import Gym
+from explore.models import Gym, Post
 from .models import AdminAction, LoginLog
-from .serializers import AdminUserSerializer, AdminGymSerializer, AdminActionSerializer, LoginLogSerializer
+from .serializers import AdminUserSerializer, AdminGymSerializer, AdminActionSerializer, LoginLogSerializer, AdminPostSerializer
 from django.utils import timezone
 from datetime import timedelta
 
@@ -142,6 +142,29 @@ class AdminGymViewSet(viewsets.ModelViewSet):
             details=f"Deleted gym {instance.name}"
         )
         instance.delete()
+
+class AdminPostViewSet(viewsets.ViewSet):
+    permission_classes = [IsAdminUser]
+
+    def list(self, request):
+        posts = Post.objects.all().order_by('-created_at')[:100]  # Limit to 100 for admin overview
+        serializer = AdminPostSerializer(posts, many=True)
+        return Response(serializer.data)
+
+    def destroy(self, request, pk=None):
+        try:
+            post = Post.objects.get(id=pk)
+            post.delete()
+            AdminAction.objects.create(
+                admin=request.user,
+                action_type='DELETE',
+                target_model='POST',
+                target_id=str(pk),
+                details=f"Deleted user post from {post.username}"
+            )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class AdminActionListView(views.APIView):
     permission_classes = [IsAdminUser]

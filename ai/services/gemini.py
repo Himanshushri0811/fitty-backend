@@ -1,8 +1,7 @@
 import os
-import google.generativeai as genai
+from google import genai
 from django.conf import settings
 from .context_builder import build_system_context
-
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -16,16 +15,19 @@ if not api_key:
     # try settings if env var not picked up directly
     api_key = getattr(settings, 'GEMINI_API_KEY', getattr(settings, 'GOOGLE_API_KEY', None))
 
-if api_key:
-    genai.configure(api_key=api_key)
+DEFAULT_MODEL = "gemini-2.0-flash"
 
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+def get_gemini_client():
+    if not api_key:
+        return None
+    return genai.Client(api_key=api_key)
 
 def generate_chat_response(session, user_message, user):
     """
     Generates a response from Gemini, maintaining session history and injecting context.
     """
-    if not api_key:
+    client = get_gemini_client()
+    if not client:
         return "System Error: AI Brain missing API Key."
 
     try:
@@ -33,41 +35,38 @@ def generate_chat_response(session, user_message, user):
         system_instruction = build_system_context(user)
         
         # 2. Format History for Gemini
-        # Gemini expects history excluding the current new message in start_chat, 
-        # OR we can just append previous messages.
         gemini_history = []
         for msg in session.messages:
-            # Map 'system' role if we stored it, though Gemini 1.5 uses system_instruction separate.
-            # We only send user/model roles in history.
             if msg.role in ['user', 'model']:
                 gemini_history.append({
                     "role": "user" if msg.role == "user" else "model",
-                    "parts": [msg.content]
+                    "parts": [{"text": msg.content}]
                 })
 
-        # 3. Create Model with System Prompt
-        model = genai.GenerativeModel(
-            model_name=DEFAULT_MODEL,
-            system_instruction=system_instruction
+        # 3. Use Chat Session with the new SDK
+        chat = client.chats.create(
+            model=DEFAULT_MODEL,
+            config={
+                "system_instruction": system_instruction,
+            },
+            history=gemini_history
         )
-
-        # 4. Start Chat Session
-        chat = model.start_chat(history=gemini_history)
         
-        # 5. Send User Message
+        # 4. Send User Message
         response = chat.send_message(user_message)
         
         return response.text.strip()
 
     except Exception as e:
-        print(f"Gemini API Error: {e}")
+        print(f"Gemini API Error (services/gemini.py): {e}")
         return "I'm having trouble connecting to the network instantly. Please try again explicitly."
 
 def get_posture_feedback(workout, exercise, status, issue=None):
     """
     Generates short feedback for posture correction.
     """
-    if not api_key:
+    client = get_gemini_client()
+    if not client:
         return "Focus on good form and keep going!"
 
     prompt = f"""You are Fitty.
@@ -78,8 +77,10 @@ Issue: {issue or 'None'}
 Give 1-2 sentences of motivating feedback."""
     
     try:
-        model = genai.GenerativeModel(DEFAULT_MODEL)
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=DEFAULT_MODEL,
+            contents=prompt
+        )
         return response.text.strip()
     except Exception as e:
         print(f"Posture Feedback Error: {e}")
@@ -91,7 +92,8 @@ def generate_workout_plan_json(user_profile):
     """
     import json
     
-    if not api_key:
+    client = get_gemini_client()
+    if not client:
         return None
 
     # Construct the Prompt
@@ -137,21 +139,15 @@ def generate_workout_plan_json(user_profile):
     5. Include 7 days explicitly (Monday to Sunday).
     """
 
-    # Dynamic Model Selection
-    from .model_selector import get_best_gemini_model
-    best_model = get_best_gemini_model()
-    
-    # Configure generation based on model capabilities
-    gen_config = {}
-    if "gemini-1.5" in best_model or "gemini-2.0" in best_model or "gemini-2.5" in best_model:
-         gen_config = {"response_mime_type": "application/json"}
-
     try:
-        model = genai.GenerativeModel(
-            model_name=best_model, 
-            generation_config=gen_config
+        # Use Controlled Generation for JSON
+        response = client.models.generate_content(
+            model=DEFAULT_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json"
+            }
         )
-        response = model.generate_content(prompt)
         
         # Parse JSON
         plan_data = json.loads(response.text)
