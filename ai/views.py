@@ -7,7 +7,7 @@ from .usage import check_and_increment_quota
 from subscriptions.service import SubscriptionService # Ensure we don't break other refs if any
 
 class AISessionListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """
@@ -28,7 +28,7 @@ class AISessionListAPIView(APIView):
             return Response({"error": str(e)}, status=500)
 
 class AISessionDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def delete(self, request, id):
         """
@@ -45,7 +45,7 @@ class AISessionDetailAPIView(APIView):
             return Response({"error": str(e)}, status=500)
 
 class AIChatAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """

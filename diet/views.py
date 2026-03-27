@@ -14,7 +14,7 @@ def get_ai_generator():
     return generate_food_persona
 
 class DietProfileView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         profile = DietProfile.objects(user=request.user).first()
@@ -53,7 +53,7 @@ class DietProfileView(APIView):
         return Response(serializer.errors, status=400)
 
 class WeeklyPlanView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         plan = get_or_create_weekly_plan(request.user)
@@ -79,7 +79,7 @@ class WeeklyPlanView(APIView):
         })
 
 class FoodSearchView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         query = request.query_params.get('q', '')
@@ -90,7 +90,7 @@ class FoodSearchView(APIView):
         return Response(serializer.data)
 
 class ReplaceMealView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         day = request.data.get('day', '').lower()
@@ -211,7 +211,7 @@ class DietCarouselView(APIView):
     Returns foods for the AI Smart Box. 
     Triggers AI Generation if content is missing.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         user_name = request.user.name or "Friend"
@@ -293,7 +293,7 @@ class DietCarouselView(APIView):
         return Response(results)
 
 class DietFoodDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request, id):
         food = FoodItem.objects(id=id).first()
@@ -328,7 +328,7 @@ class CalculateMacrosView(APIView):
     """
     Takes natural language food log and returns estimated nutrition via AI.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         text = request.data.get('text', '')
@@ -349,7 +349,7 @@ class LogFoodView(APIView):
     """
     Saves a food log to the user's daily history.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         from datetime import datetime

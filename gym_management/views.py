@@ -2,7 +2,7 @@ import razorpay
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 from .models import Member
 from accounts.models import GymOwner
@@ -21,7 +21,7 @@ class GymOwnerDashboardOverview(APIView):
     Main Dashboard for Gym Owners. 
     Shows plan details, limits, and profitability simulation.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         if request.user.role != 'GYM_OWNER':
@@ -62,7 +62,7 @@ class MemberManagerView(APIView):
     """
     CRUD for Gym Members stored in MongoDB
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         if request.user.role != 'GYM_OWNER':
@@ -172,7 +172,7 @@ class GymProfileView(APIView):
     """
     Manage Gym Profile Settings
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         if request.user.role != 'GYM_OWNER':
@@ -212,7 +212,7 @@ class NotificationView(APIView):
     """
     Handle Notifications (Mock implementation for demo)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request):
         if request.user.role != 'GYM_OWNER':

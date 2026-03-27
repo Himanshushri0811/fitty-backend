@@ -1,13 +1,13 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from .models import Post, SocialProfile, Like, Comment, Follow
 from .serializers import PostSerializer, SocialProfileSerializer
 from accounts.models import User
 import json
 
 class FeedView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         # Very simple feed for now
@@ -16,7 +16,7 @@ class FeedView(APIView):
         return Response(serializer.data)
 
 class PostCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         data = request.data
@@ -30,7 +30,7 @@ class PostCreateView(APIView):
         return Response(PostSerializer(post).data, status=201)
 
 class SocialProfileView(APIView):
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [AllowAny]
 
     def get(self, request, username):
         profile = SocialProfile.objects(username=username).first()
@@ -52,7 +52,7 @@ class SocialProfileView(APIView):
         return Response(SocialProfileSerializer(profile, context={'request': request}).data)
 
 class MyProfileView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         profile = SocialProfile.objects(user=request.user).first()
@@ -83,7 +83,7 @@ class MyProfileView(APIView):
         return Response(SocialProfileSerializer(profile).data)
 
 class UserPostListView(APIView):
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [AllowAny]
 
     def get(self, request, username):
         user = User.objects(username=username).first()

@@ -59,12 +59,13 @@ def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT")
         if api_key:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model='gemini-1.5-flash', # More stable for free-tier
+                model='gemini-1.5-flash',
                 contents=prompt,
             )
             if response and response.text:
                 return response.text
     except Exception as gemini_err:
+         print(f"🔴 Tier 1 (Gemini) Failed: {gemini_err}")
          logger.warning(f"Tier 1 (Gemini) failed: {gemini_err}")
 
     # TIER 2: GROQ (Ultra-fast stable fallback)
@@ -73,14 +74,24 @@ def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT")
         groq_key = os.getenv("GROQ_API_KEY")
         if groq_key:
             client = Groq(api_key=groq_key)
-            completion = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile",
-                temperature=0.7,
-            )
-            if completion.choices[0].message.content:
-                return completion.choices[0].message.content
+            # Try a mix of models for better hit rate
+            models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama3-70b-8192"]
+            last_err = None
+            for model_name in models:
+                try:
+                    completion = client.chat.completions.create(
+                        messages=[{"role": "user", "content": prompt}],
+                        model=model_name,
+                        temperature=0.7,
+                    )
+                    if completion.choices[0].message.content:
+                        return completion.choices[0].message.content
+                except Exception as model_err:
+                    last_err = model_err
+                    continue
+            if last_err: print(f"🔴 Tier 2 (Groq) Failed: {last_err}")
     except Exception as groq_err:
+        print(f"🔴 Tier 2 (Groq) Fatal: {groq_err}")
         logger.warning(f"Tier 2 (Groq) failed: {groq_err}")
 
     # TIER 3: SMART OFFLINE FALLBACK
@@ -118,15 +129,18 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
             pdf_path = generate_plan_pdf.invoke({"title": f"Fitty_{name.replace(' ', '_')}_Plan", "content": plan_content})
             return f"Here is your highly structured personalized plan, {name}! 💪🔥\n\n📥 **[Click Here to Download Your Complete PDF Plan]({pdf_path})**"
 
-        # 3. HYBRID ROUTER
+        # 3. HYBRID ROUTER (Safely enrich prompt if possible)
         is_diet = any(w in msg for w in ["diet", "food", "eat", "meal", "nutrition", "calories", "protein"])
         is_workout = any(w in msg for w in ["workout", "exercise", "plan", "gym", "train", "chest", "legs", "gain", "loss"])
         
         contextual_data = ""
-        if is_workout:
-            contextual_data += f"\n[WORKOUT TIP]: {workout_generator.invoke({'goal': goal, 'fitness_level': level})}"
-        if is_diet:
-            contextual_data += f"\n[DIET TIP]: {diet_generator.invoke({'weight': weight, 'goal': goal})}"
+        try:
+            if is_workout:
+                contextual_data += f"\n[WORKOUT TIP]: {workout_generator.invoke({'goal': goal, 'fitness_level': level})}"
+            if is_diet:
+                contextual_data += f"\n[DIET TIP]: {diet_generator.invoke({'weight': weight, 'goal': goal})}"
+        except Exception as tool_err:
+             logger.warning(f"Optional tools failed (ignoring): {tool_err}")
 
         history_str = "\n".join([f"{h.get('role', 'user')}: {h.get('content', '')}" for h in (chat_history or [])[-4:]])
         
@@ -143,4 +157,4 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
     except Exception as e:
         logger.error(f"Agent router crash: {e}")
         return get_smart_fallback(user_message)
-
+

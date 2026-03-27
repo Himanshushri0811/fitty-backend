@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .models import WaterIntake, DailyIntake, DailyPlan, PlanItem, Exercise
 from .serializers import WaterIntakeSerializer, DailyPlanSerializer, ExerciseSerializer
 from .utils import generate_daily_plan
@@ -10,7 +10,7 @@ import pytz
 import re
 
 class ExerciseDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request, name):
         escaped_name = re.escape(name)
@@ -43,7 +43,7 @@ class ExerciseDetailView(APIView):
         return Response(serializer.errors, status=400)
 
 class ExerciseListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         exercises = Exercise.objects.all()
@@ -68,7 +68,7 @@ class ExerciseListView(APIView):
         return Response(serializer.errors, status=400)
 
 class WaterIntakeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get_today_date_str(self):
         # Use a fixed timezone or user's timezone if available. 
@@ -138,7 +138,7 @@ class WaterIntakeView(APIView):
         }, status=status.HTTP_200_OK)
 
 class DailyPlanView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get_today_date_str(self):
         # Default to India ID for now

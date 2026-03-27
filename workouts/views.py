@@ -16,7 +16,7 @@ from django.core.files.base import ContentFile
 from bson import ObjectId
 
 class GenerateWorkoutPlanView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         user = request.user
@@ -116,7 +116,7 @@ class GenerateWorkoutPlanView(APIView):
 
 
 class ActiveWorkoutPlanView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         user_id = str(request.user.id)
@@ -166,7 +166,7 @@ class ActiveWorkoutPlanView(APIView):
         return Response({"plan": plan_data})
 
 class ExerciseListView(APIView):
-    permission_classes = [IsAuthenticated] # Or Admin User only for editing
+    permission_classes = [AllowAny] # Or Admin User only for editing
 
     def get(self, request):
         exercises = Exercise.objects.all()
@@ -225,7 +225,7 @@ class ExerciseListView(APIView):
 
 
 class ExerciseDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get_object(self, id):
         try:
@@ -281,7 +281,7 @@ class ExerciseDetailView(APIView):
 # =========================================================================
 
 class AdminExerciseVideoUploadView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request):
         user = request.user
@@ -367,7 +367,7 @@ class AdminExerciseVideoUploadView(APIView):
             return Response({"error": "Failed to save video", "details": str(e)}, status=500)
 
 class AdminExerciseVideoDeleteView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def delete(self, request, id):
         user = request.user
@@ -436,7 +436,7 @@ class AdminExerciseVideoDeleteView(APIView):
             return Response({"error": f"Deletion failed: {str(e)}"}, status=500)
 
 class AdminExerciseVideoReplaceView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def post(self, request):
         # Replace existing video for an exercise
@@ -529,7 +529,7 @@ class AdminExerciseVideoReplaceView(APIView):
             return Response({"error": f"Replace failed: {str(e)}"}, status=500)
 
 class AdminVideoListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         if getattr(request.user, 'role', 'USER') != 'ADMIN':

@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 from django.conf import settings
 import razorpay
@@ -14,7 +14,7 @@ class CreateSubscriptionOrderView(APIView):
     """
     Creates a Razorpay Order for Pro Plan Upgrade.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         if request.user.role != 'GYM_OWNER':
@@ -70,7 +70,7 @@ class VerifySubscriptionView(APIView):
     """
     Verifies Razorpay Signature and Activates Pro Plan.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         data = request.data

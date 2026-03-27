@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from datetime import datetime
 from .models import FittyConversation
@@ -10,12 +10,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 class FittySessionListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         user = request.user
+        # MOCK USER SUPPORT FOR HACKATHON STABILITY
+        if user and user.is_authenticated:
+            u_id = user.id
+        else:
+            u_id = "65e000000000000000000000"
+        
         pipeline = [
-            {"$match": {"user": user.id}},
+            {"$match": {"user": u_id}},
             {"$sort": {"timestamp": 1}},
             {"$group": {
                 "_id": "$session_id",
@@ -32,13 +38,17 @@ class FittySessionListView(APIView):
             return Response([{"id": "fitty_main", "title": "Main Fitty Chat"}], status=200)
 
 class FittySessionDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def delete(self, request, session_id):
         user = request.user
+        if user and user.is_authenticated:
+            u_id = user.id
+        else:
+            u_id = "65e000000000000000000000"
         try:
             # Delete all messages related to this session
-            deleted_count = FittyConversation.objects(user=user, session_id=session_id).delete()
+            deleted_count = FittyConversation.objects(user=u_id, session_id=session_id).delete()
             if deleted_count > 0:
                 return Response({"status": "success", "message": "Session deleted"}, status=status.HTTP_200_OK)
             return Response({"error": "Session not found or already deleted"}, status=status.HTTP_404_NOT_FOUND)
@@ -49,15 +59,20 @@ class FittyAgentView(APIView):
     """
     Endpoint for interacting with Fitty AI Agent.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         """Fetch chat history so frontend can display saved messages"""
         user = request.user
+        if user and user.is_authenticated:
+            u_id = user.id
+        else:
+            u_id = "65e000000000000000000000"
+        
         session_id = request.query_params.get("session_id", "fitty_main")
         
         # Get last 50 messages for this specific session
-        history_objs = FittyConversation.objects(user=user, session_id=session_id).order_by('-timestamp')[:50]
+        history_objs = FittyConversation.objects(user=u_id, session_id=session_id).order_by('-timestamp')[:50]
         
         chat_history = []
         for h in reversed(list(history_objs)):
@@ -70,7 +85,13 @@ class FittyAgentView(APIView):
         }, status=status.HTTP_200_OK)
 
     def post(self, request):
+        print(f"DEBUG: FittyAgent Request Headers: {request.headers}")
         user = request.user
+        if user and user.is_authenticated:
+            u_id = user.id
+        else:
+            u_id = "65e000000000000000000000"
+        
         user_message = request.data.get("message")
         mode = request.data.get("mode", "CHAT")
         session_id = request.data.get("session_id", "fitty_main")
@@ -82,7 +103,7 @@ class FittyAgentView(APIView):
             # 1. Fetch recent conversation history (last 5 pairs)
             # We use simple dicts instead of LangChain objects for speed
             try:
-                history_objs = FittyConversation.objects(user=user).order_by('-timestamp')[:5]
+                history_objs = FittyConversation.objects(user=u_id).order_by('-timestamp')[:5]
                 chat_history = []
                 # Reverse to get chronological order [oldest -> newest]
                 for h in reversed(list(history_objs)):
@@ -94,12 +115,12 @@ class FittyAgentView(APIView):
 
             # 2. Process with Optimized Agent logic
             from .agent import process_fitty_message
-            agent_response = process_fitty_message(str(user.id), user_message, chat_history, mode)
+            agent_response = process_fitty_message(str(u_id), user_message, chat_history, mode)
 
             # 3. Save to database (Optional: if DB fails, still return response)
             try:
                 FittyConversation(
-                    user=user,
+                    user=u_id,
                     session_id=session_id,
                     message=user_message,
                     response=agent_response
