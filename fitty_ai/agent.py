@@ -10,6 +10,29 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 
+def get_smart_fallback(message):
+    """
+    Context-aware fallback when AI SDK fails (Quota/Timeout)
+    """
+    msg = message.lower()
+    
+    if any(w in msg for w in ["water", "hydrate", "drink"]):
+        return "Bhai, hydration is key! 💧 Aim for 3-4 liters daily. Quick tip: Carry a bottle everywhere to stay on track. Gemini is resting, but Fitty is always here! 🔥"
+    
+    if any(w in msg for w in ["posture", "back", "sit", "spine"]):
+        return "Champ, keep that spine neutral! 📏 If you're at a desk, retract your shoulders and keep your core tight. Posture check complete! Gemini will be back soon. 👊"
+    
+    if any(w in msg for w in ["workout", "exercise", "train", "gym", "chest", "legs"]):
+        return "Intensity matters, Champ! 🏋️ Focus on the mind-muscle connection. Even if the AI is a bit slow right now, don't let your workout slow down! Keep pushing! 🔥"
+    
+    if any(w in msg for w in ["diet", "food", "eat", "meal", "nutrition", "protein"]):
+        return "Protein is your best friend! 🍗 Aim for 1.5g per kg of bodyweight. Add more greens to your plate. I'm having a small tech glitch, but your nutrition shouldn't! 👊"
+
+    if any(w in msg for w in ["hi", "hello", "hey", "fitty"]):
+        return "Ready for a transformation, Champ? 👊 Tell me your goal and let's get started. Gemini is slightly busy, but I'm ready for you! 🔥"
+
+    return "Bhai, thoda technical delay hai background me, but hum rukenge nahi! 🔥 Aaj ka target pura karna hai. Try asking for a workout or diet tip! 👊"
+
 def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT"):
     """
     Direct call to Gemini SDK (Fast and Low Memory)
@@ -18,7 +41,7 @@ def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT")
         from google import genai
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            return "❌ API Key Missing."
+            return get_smart_fallback(user_message)
 
         client = genai.Client(api_key=api_key)
         
@@ -46,7 +69,7 @@ def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT")
         return response.text
     except Exception as e:
         logger.error(f"GenAI SDK Error: {e}")
-        return "Bhai thoda brain freeze ho gaya... 2 sec me wapis try kar 🔥"
+        return get_smart_fallback(user_message)
 
 def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT"):
     """
@@ -69,14 +92,13 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
 
         # 1. FAST PATH: ZERO LATENCY GREETINGS
         if msg in ["hi", "hello", "hey", "namaste", "what's up", "hello fitty", "hi fitty"]:
-            response_text = f"Nice 👊 ready ho {name}?\n\n1. Goal kya hai? (fat loss / muscle gain)\n2. Experience level?\n3. Gym ya home?\n\nChal plan banate hain 🔥Space"
+            response_text = f"Nice 👊 ready ho {name}?\n\n1. Goal kya hai? (fat loss / muscle gain)\n2. Experience level?\n3. Gym ya home?\n\nChal plan banate hain 🔥"
             if mode.upper() == "VOICE":
                 return f"Nice! Ready ho {name}? Chal plan banate hain."
             return response_text
 
         # 2. PDF GENERATION HOT-PATH
         if "pdf" in msg:
-            # We still use the fast SDK for the content
             plan_content = get_fitty_response_fast(f"Create a 7-day {goal} plan for {name}.", profile, "", "CHAT")
             pdf_path = generate_plan_pdf.invoke({"title": f"Fitty_{name.replace(' ', '_')}_Plan", "content": plan_content})
             return f"Here is your highly structured personalized plan, {name}! 💪🔥\n\n📥 **[Click Here to Download Your Complete PDF Plan]({pdf_path})**"
@@ -105,4 +127,5 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
 
     except Exception as e:
         logger.error(f"Agent router crash: {e}")
-        return "Bhai thoda issue aa gaya… 2 sec me try kar 🔥"
+        return get_smart_fallback(user_message)
+
