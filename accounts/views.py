@@ -257,6 +257,12 @@ class SignupAPIView(APIView):
                 'access': tokens['access'],
                 'refresh': tokens['refresh']
             }, status=201)
+        except mongoengine.errors.ValidationError as ve:
+            # Handle invalid email, duplicate keys, or other schema validation issues gracefully
+            return Response({
+                'error': 'Validation Error',
+                'details': str(ve)
+            }, status=400)
         except Exception as e:
             logger.error(f"Signup Error Traceback: ", exc_info=True)
             return Response({

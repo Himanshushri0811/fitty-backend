@@ -4,22 +4,76 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from datetime import datetime
 from .models import FittyConversation
-from ai.services.fitty_service import generate_fitty_response
+from .agent import process_fitty_message
 import logging
 
 logger = logging.getLogger(__name__)
 
+class FittySessionListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        pipeline = [
+            {"$match": {"user": user.id}},
+            {"$sort": {"timestamp": 1}},
+            {"$group": {
+                "_id": "$session_id",
+                "title": {"$first": "$message"},
+                "updated_at": {"$last": "$timestamp"}
+            }},
+            {"$sort": {"updated_at": -1}}
+        ]
+        try:
+            result = list(FittyConversation.objects.aggregate(*pipeline))
+            sessions = [{"id": str(i["_id"]), "title": (str(i["title"])[:30] + '...') if len(str(i["title"])) > 30 else str(i["title"])} for i in result if i.get("_id")]
+            return Response(sessions, status=200)
+        except Exception as e:
+            return Response([{"id": "fitty_main", "title": "Main Fitty Chat"}], status=200)
+
+class FittySessionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, session_id):
+        user = request.user
+        try:
+            # Delete all messages related to this session
+            deleted_count = FittyConversation.objects(user=user, session_id=session_id).delete()
+            if deleted_count > 0:
+                return Response({"status": "success", "message": "Session deleted"}, status=status.HTTP_200_OK)
+            return Response({"error": "Session not found or already deleted"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class FittyAgentView(APIView):
     """
     Endpoint for interacting with Fitty AI Agent.
-    POST /api/fitty-agent/
-    Request Body: { "message": "Fitty target weight loss" }
     """
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Fetch chat history so frontend can display saved messages"""
+        user = request.user
+        session_id = request.query_params.get("session_id", "fitty_main")
+        
+        # Get last 50 messages for this specific session
+        history_objs = FittyConversation.objects(user=user, session_id=session_id).order_by('-timestamp')[:50]
+        
+        chat_history = []
+        for h in reversed(list(history_objs)):
+            chat_history.append({"role": "user", "content": h.message, "timestamp": h.timestamp})
+            chat_history.append({"role": "model", "content": h.response, "timestamp": h.timestamp})
+            
+        return Response({
+            "session_id": session_id,
+            "history": chat_history
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
         user = request.user
         user_message = request.data.get("message")
+        mode = request.data.get("mode", "CHAT")
+        session_id = request.data.get("session_id", "fitty_main")
 
         if not user_message:
             return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -35,12 +89,13 @@ class FittyAgentView(APIView):
                 chat_history.append({"role": "user", "content": h.message})
                 chat_history.append({"role": "model", "content": h.response})
 
-            # 2. Process with Optimized Fitty Service (1-3s response)
-            agent_response = generate_fitty_response(user_message, chat_history)
+            # 2. Process with Langchain Tool Agent
+            agent_response = process_fitty_message(str(user.id), user_message, chat_history, mode)
 
             # 3. Save to database
             FittyConversation(
                 user=user,
+                session_id=session_id,
                 message=user_message,
                 response=agent_response
             ).save()

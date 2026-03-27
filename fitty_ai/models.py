@@ -16,6 +16,7 @@ class FittyConversation(Document):
     }
 
     user = ReferenceField(User, required=True)
+    session_id = StringField(default="fitty_main")
     message = StringField(required=True)
     response = StringField(required=True)
     timestamp = DateTimeField(default=datetime.utcnow)
