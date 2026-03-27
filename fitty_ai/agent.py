@@ -35,41 +35,56 @@ def get_smart_fallback(message):
 
 def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT"):
     """
-    Direct call to Gemini SDK (Fast and Low Memory)
+    Tiered Reliability: Gemini -> Groq -> Smart Fallback
     """
+    prompt = f"""
+    Act as 'Fitty', an elite Indian AI Fitness Coach. Use 'Champ' or names.
+    
+    USER PROFILE: {profile_str}
+    HISTORY: {history_str}
+    
+    USER REQUEST: "{user_message}"
+    
+    RULES:
+    - MODE: {mode.upper()}
+    - If VOICE: 2-3 short, friendly sentences. No markdown (*).
+    - If CHAT: Detailed, bulleted plan.
+    - Sound energetic and Indian! 👊
+    """
+
+    # TIER 1: GEMINI (High context quality)
     try:
         from google import genai
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            return get_smart_fallback(user_message)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash', # More stable for free-tier
+                contents=prompt,
+            )
+            if response and response.text:
+                return response.text
+    except Exception as gemini_err:
+         logger.warning(f"Tier 1 (Gemini) failed: {gemini_err}")
 
-        client = genai.Client(api_key=api_key)
-        
-        prompt = f"""
-        Act as 'Fitty', an elite Indian AI Fitness Coach. Use 'Champ' or names.
-        
-        USER PROFILE:
-        {profile_str}
-        
-        RECENT HISTORY:
-        {history_str}
-        
-        USER REQUEST: "{user_message}"
-        
-        CRITICAL FORMATTING:
-        - If MODE is VOICE: Keep response to EXACTLY 2-3 short, conversational sentences. No markdown (*).
-        - If MODE is CHAT: Provide a detailed, bulleted, and professional plan.
-        - NEVER say "I'll generate". Give the final answer NOW.
-        """
+    # TIER 2: GROQ (Ultra-fast stable fallback)
+    try:
+        from groq import Groq
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            client = Groq(api_key=groq_key)
+            completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.7,
+            )
+            if completion.choices[0].message.content:
+                return completion.choices[0].message.content
+    except Exception as groq_err:
+        logger.warning(f"Tier 2 (Groq) failed: {groq_err}")
 
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        logger.error(f"GenAI SDK Error: {e}")
-        return get_smart_fallback(user_message)
+    # TIER 3: SMART OFFLINE FALLBACK
+    return get_smart_fallback(user_message)
 
 def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT"):
     """
