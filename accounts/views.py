@@ -139,7 +139,20 @@ from rest_framework.permissions import AllowAny
 class HealthCheckView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
-        return Response({"status": "ok"})
+        db_status = "Connected"
+        try:
+            # Check mongo connection
+            from mongoengine.connection import get_db
+            get_db().command("ping")
+        except Exception:
+            db_status = "Disconnected"
+            
+        return Response({
+            "status": "ok",
+            "database": db_status,
+            "version": "1.1.0-unbreakable",
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SignupAPIView(APIView):
