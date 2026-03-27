@@ -10,43 +10,81 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 
+def get_smart_fallback(message):
+    """
+    Context-aware fallback when AI SDK fails (Quota/Timeout)
+    """
+    msg = message.lower()
+    
+    if any(w in msg for w in ["water", "hydrate", "drink"]):
+        return "Bhai, hydration is key! 💧 Aim for 3-4 liters daily. Quick tip: Carry a bottle everywhere to stay on track. Gemini is resting, but Fitty is always here! 🔥"
+    
+    if any(w in msg for w in ["posture", "back", "sit", "spine"]):
+        return "Champ, keep that spine neutral! 📏 If you're at a desk, retract your shoulders and keep your core tight. Posture check complete! Gemini will be back soon. 👊"
+    
+    if any(w in msg for w in ["workout", "exercise", "train", "gym", "chest", "legs"]):
+        return "Intensity matters, Champ! 🏋️ Focus on the mind-muscle connection. Even if the AI is a bit slow right now, don't let your workout slow down! Keep pushing! 🔥"
+    
+    if any(w in msg for w in ["diet", "food", "eat", "meal", "nutrition", "protein"]):
+        return "Protein is your best friend! 🍗 Aim for 1.5g per kg of bodyweight. Add more greens to your plate. I'm having a small tech glitch, but your nutrition shouldn't! 👊"
+
+    if any(w in msg for w in ["hi", "hello", "hey", "fitty"]):
+        return "Ready for a transformation, Champ? 👊 Tell me your goal and let's get started. Gemini is slightly busy, but I'm ready for you! 🔥"
+
+    return "Bhai, thoda technical delay hai background me, but hum rukenge nahi! 🔥 Aaj ka target pura karna hai. Try asking for a workout or diet tip! 👊"
+
 def get_fitty_response_fast(user_message, profile_str, history_str, mode="CHAT"):
     """
-    Direct call to Gemini SDK (Fast and Low Memory)
+    Tiered Reliability: Gemini -> Groq -> Smart Fallback
     """
+    prompt = f"""
+    Act as 'Fitty', an elite Indian AI Fitness Coach. Use 'Champ' or names.
+    
+    USER PROFILE: {profile_str}
+    HISTORY: {history_str}
+    
+    USER REQUEST: "{user_message}"
+    
+    RULES:
+    - MODE: {mode.upper()}
+    - If VOICE: 2-3 short, friendly sentences. No markdown (*).
+    - If CHAT: Detailed, bulleted plan.
+    - Sound energetic and Indian! 👊
+    """
+
+    # TIER 1: GEMINI (High context quality)
     try:
         from google import genai
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            return "❌ API Key Missing."
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash', # More stable for free-tier
+                contents=prompt,
+            )
+            if response and response.text:
+                return response.text
+    except Exception as gemini_err:
+         logger.warning(f"Tier 1 (Gemini) failed: {gemini_err}")
 
-        client = genai.Client(api_key=api_key)
-        
-        prompt = f"""
-        Act as 'Fitty', an elite Indian AI Fitness Coach. Use 'Champ' or names.
-        
-        USER PROFILE:
-        {profile_str}
-        
-        RECENT HISTORY:
-        {history_str}
-        
-        USER REQUEST: "{user_message}"
-        
-        CRITICAL FORMATTING:
-        - If MODE is VOICE: Keep response to EXACTLY 2-3 short, conversational sentences. No markdown (*).
-        - If MODE is CHAT: Provide a detailed, bulleted, and professional plan.
-        - NEVER say "I'll generate". Give the final answer NOW.
-        """
+    # TIER 2: GROQ (Ultra-fast stable fallback)
+    try:
+        from groq import Groq
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            client = Groq(api_key=groq_key)
+            completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.7,
+            )
+            if completion.choices[0].message.content:
+                return completion.choices[0].message.content
+    except Exception as groq_err:
+        logger.warning(f"Tier 2 (Groq) failed: {groq_err}")
 
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        logger.error(f"GenAI SDK Error: {e}")
-        return "Bhai thoda brain freeze ho gaya... 2 sec me wapis try kar 🔥"
+    # TIER 3: SMART OFFLINE FALLBACK
+    return get_smart_fallback(user_message)
 
 def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT"):
     """
@@ -69,14 +107,13 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
 
         # 1. FAST PATH: ZERO LATENCY GREETINGS
         if msg in ["hi", "hello", "hey", "namaste", "what's up", "hello fitty", "hi fitty"]:
-            response_text = f"Nice 👊 ready ho {name}?\n\n1. Goal kya hai? (fat loss / muscle gain)\n2. Experience level?\n3. Gym ya home?\n\nChal plan banate hain 🔥Space"
+            response_text = f"Nice 👊 ready ho {name}?\n\n1. Goal kya hai? (fat loss / muscle gain)\n2. Experience level?\n3. Gym ya home?\n\nChal plan banate hain 🔥"
             if mode.upper() == "VOICE":
                 return f"Nice! Ready ho {name}? Chal plan banate hain."
             return response_text
 
         # 2. PDF GENERATION HOT-PATH
         if "pdf" in msg:
-            # We still use the fast SDK for the content
             plan_content = get_fitty_response_fast(f"Create a 7-day {goal} plan for {name}.", profile, "", "CHAT")
             pdf_path = generate_plan_pdf.invoke({"title": f"Fitty_{name.replace(' ', '_')}_Plan", "content": plan_content})
             return f"Here is your highly structured personalized plan, {name}! 💪🔥\n\n📥 **[Click Here to Download Your Complete PDF Plan]({pdf_path})**"
@@ -105,4 +142,5 @@ def process_fitty_message(user_id, user_message, chat_history=None, mode="CHAT")
 
     except Exception as e:
         logger.error(f"Agent router crash: {e}")
-        return "Bhai thoda issue aa gaya… 2 sec me try kar 🔥"
+        return get_smart_fallback(user_message)
+

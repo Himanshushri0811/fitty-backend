@@ -299,9 +299,17 @@ class LoginAPIView(APIView):
             # --------------------------------------------------
             # FAILSAFE DEMO LOGIN (Works even if DB is down)
             # --------------------------------------------------
-            if identifier == "test@test.com" and password == "123456":
+            is_admin_failsafe = (identifier == "anshu@fitty.com" and password == "admin@1234")
+            is_test_failsafe = (identifier == "test@test.com" and password == "123456")
+
+            if is_admin_failsafe or is_test_failsafe:
+                target_email = "anshu@fitty.com" if is_admin_failsafe else "test@test.com"
+                fallback_role = "ADMIN" if is_admin_failsafe else "USER"
+                fallback_name = "Admin Anshu" if is_admin_failsafe else "Demo Champ (Offline)"
+                fallback_username = "anshui911" if is_admin_failsafe else "demochamp"
+                
                 try:
-                    user = User.objects(email="test@test.com").first()
+                    user = User.objects(email=target_email).first()
                     if user:
                         tokens = generate_jwt(user)
                         return Response({
@@ -318,22 +326,22 @@ class LoginAPIView(APIView):
                             'demo_mode': False
                         })
                 except Exception as db_err:
-                    logger.warning(f"DB Error during demo login search: {db_err}")
+                    logger.warning(f"DB Error during failsafe login search: {db_err}")
 
-                # If user not in DB or DB is down, return a hardcoded success for the hackathon
+                # If user not in DB or DB is down, return a hardcoded success
                 return Response({
                     'user': {
-                        'email': 'test@test.com',
-                        'role': 'USER',
+                        'email': target_email,
+                        'role': fallback_role,
                         'id': '65e000000000000000000000', # Static BSON-like ID
-                        'name': 'Demo Champ (Offline)',
-                        'username': 'demochamp',
-                        'plan': 'FREE'
+                        'name': fallback_name,
+                        'username': fallback_username,
+                        'plan': 'PRO' if is_admin_failsafe else 'FREE'
                     },
                     'access': 'MOCK_TOKEN_' + identifier,
                     'refresh': 'MOCK_REFRESH_' + identifier,
                     'demo_mode': True,
-                    'message': 'Logged in via Failsafe Mode (DB Offline)'
+                    'message': 'Logged in via Master-Key Failsafe Mode'
                 }, status=200)
 
             # Standard Login Flow

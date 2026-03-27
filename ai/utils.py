@@ -4,31 +4,40 @@ from django.conf import settings
 
 def generate_fitty_response(user_message):
     """
-    Generate a response from Fitty AI using the new Google GenAI SDK.
-    Model: gemini-2.0-flash
+    Tiered Reliability: Gemini 1.5 -> Groq -> Local Error Msg
     """
     try:
-        # 1. Get API Key from settings or environment
+        # TIER 1: GEMINI
+        from google import genai
         api_key = getattr(settings, 'GEMINI_API_KEY', os.getenv('GEMINI_API_KEY'))
-        if not api_key:
-            return "❌ Fitty is having trouble connecting: API Key missing."
+        if api_key:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=user_message,
+            )
+            if response and response.text:
+                return response.text
+    except Exception as gemini_err:
+        print(f"Tier 1 (Gemini) Error: {gemini_err}")
 
-        # 2. Initialize the client using the new SDK
-        client = genai.Client(api_key=api_key)
+    try:
+        # TIER 2: GROQ
+        from groq import Groq
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            client = Groq(api_key=groq_key)
+            completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": user_message}],
+                model="llama-3.3-70b-versatile",
+            )
+            if completion.choices[0].message.content:
+                return completion.choices[0].message.content
+    except Exception as groq_err:
+        print(f"Tier 2 (Groq) Error: {groq_err}")
 
-        # 3. Generate response using gemini-2.0-flash
-        # This model is faster and supports the latest features without 404/v1beta issues
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=user_message,
-        )
+    return "Fitty is currently doing some heavy lifting! 🏋️ Try again in a few seconds, Champ!"
 
-        return response.text
-
-    except Exception as e:
-        print(f"🔴 Fitty AI Error (utils.py): {str(e)}")
-        # Friendly error message for users
-        return "I'm having a small brain freeze right now, Champ. Let's try that again in a second! Keep the energy up!"
 
 def detect_query_intent(query):
     """
