@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from datetime import datetime
 from .models import FittyConversation
-from .agent import process_fitty_message
+# import moved inside post to prevent boot overload
 import logging
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,7 @@ class FittyAgentView(APIView):
                 chat_history.append({"role": "model", "content": h.response})
 
             # 2. Process with Langchain Tool Agent
+            from .agent import process_fitty_message
             agent_response = process_fitty_message(str(user.id), user_message, chat_history, mode)
 
             # 3. Save to database
