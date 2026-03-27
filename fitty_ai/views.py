@@ -110,6 +110,7 @@ class FittyAgentView(APIView):
             return Response({
                 "status": "success",
                 "reply": agent_response,
+                "response": agent_response, # Legacy support
                 "timestamp": datetime.utcnow()
             }, status=status.HTTP_200_OK)
 
@@ -123,6 +124,7 @@ class FittyAgentView(APIView):
             return Response({
                 "status": "success", # marked as success to prevent frontend toast errors
                 "reply": fallback_msg,
+                "response": fallback_msg, # Legacy support
                 "error_detail": error_str
             }, status=status.HTTP_200_OK)
 
