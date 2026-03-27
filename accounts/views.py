@@ -12,7 +12,7 @@ import mongoengine
 from mongoengine.queryset.visitor import Q
 import random
 from .workout_plans import DEFAULT_WORKOUT_PLANS
-from ai.utils import generate_fitty_response # Updated to use the new Gemini SDK function
+# imports moved inside methods to prevent boot block
 import os
 import logging
 
@@ -139,7 +139,20 @@ from rest_framework.permissions import AllowAny
 class HealthCheckView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
-        return Response({"status": "ok"})
+        db_status = "Connected"
+        try:
+            # Check mongo connection
+            from mongoengine.connection import get_db
+            get_db().command("ping")
+        except Exception:
+            db_status = "Disconnected"
+            
+        return Response({
+            "status": "ok",
+            "database": db_status,
+            "version": "1.1.0-unbreakable",
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SignupAPIView(APIView):
@@ -737,8 +750,9 @@ class WorkoutExplanationAPI(APIView):
         """
         
         try:
+            from ai.utils import generate_fitty_response
             explanation = generate_fitty_response(prompt)
-        except:
+        except Exception:
              explanation = f"Since your goal is {goal}, today's focus on {today_workout.focus} is designed to optimize your progress!"
         
         return Response({'explanation': explanation})
