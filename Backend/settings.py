@@ -93,9 +93,7 @@ import mongoengine
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not MONGO_URI:
-    print("❌ MONGO_URI missing")
-    if not DEBUG:
-        sys.exit(1)
+    print("❌ MONGO_URI missing, but allowing server to boot for health checks.")
 
 if "test" not in sys.argv:
     try:
