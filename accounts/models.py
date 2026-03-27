@@ -56,6 +56,14 @@ class User(Document):
     last_login = DateTimeField()
     created_at = DateTimeField(default=datetime.utcnow)
     
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
     # Common Profile Fields
     name = StringField() 
     profile_pic = StringField(default="") 
