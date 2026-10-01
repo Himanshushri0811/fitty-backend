@@ -27,7 +27,10 @@ venv/
 db.sqlite3
 staticfiles/
 media/
+profile_pics/
 logs/
+_trash/
+.agent/
 
 # =========================
 # Django Migrations Cache

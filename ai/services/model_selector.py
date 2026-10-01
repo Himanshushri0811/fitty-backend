@@ -1,9 +1,11 @@
 import os
-from django.conf import settings
+
+# Default wahi model jo Google ke error me suggest hua tha.
+# Asli naam list_models.py se verify karke .env me GEMINI_MODEL set karo.
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+
 
 def get_best_gemini_model():
-    """
-    Returns the preferred model directly to save API quota from unnecessary test calls.
-    Using gemini-2.0-flash as it is the most modern and supported version.
-    """
-    return "gemini-2.0-flash"
+    """Returns the Gemini model name from the environment, with a safe default.
+    Model names change often, so the name lives in .env rather than in code."""
+    return os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)

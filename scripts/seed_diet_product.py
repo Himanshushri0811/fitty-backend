@@ -2,9 +2,11 @@
 import os
 import django
 import sys
+from pathlib import Path
 
-# Setup Django Environment
-sys.path.append('d:\\demo_project\\FITMITRA\\backend')
+# Setup Django Environment dynamically
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Backend.settings')
 django.setup()
 

@@ -1,8 +1,12 @@
 import os
+import sys
+from pathlib import Path
 from groq import Groq
 from dotenv import load_dotenv
 
-load_dotenv('d:/demo_project/FITMITRA/Backend/.env')
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+load_dotenv(BASE_DIR / '.env')
 
 def test():
     key = os.getenv("GROQ_API_KEY")

@@ -1,24 +1,26 @@
 import os
 import sys
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Add Backend to path
-sys.path.append('d:/demo_project/FITMITRA/Backend')
-load_dotenv('d:/demo_project/FITMITRA/Backend/.env')
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+load_dotenv(BASE_DIR / '.env')
 
 def test():
     try:
         from google import genai
         api_key = os.getenv("GEMINI_API_KEY")
-        print(f"Testing with Key: {api_key[:10]}...")
-        
         if not api_key:
             print("❌ No API Key found in .env")
             return
 
+        model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        print(f"Testing model: {model}")
+
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=model,
             contents="Say 'Fitty is back!' if you can hear me.",
         )
         print(f"✅ Response: {response.text}")
