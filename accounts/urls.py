@@ -14,7 +14,8 @@ from .views import (
     ResetPasswordAPIView,
     VerifyResetTokenAPIView,
     AdminUserListView,
-    AdminUserRoleView
+    AdminUserRoleView,
+    DashboardStatsAPI,
 )
 
 urlpatterns = [
@@ -32,6 +33,7 @@ urlpatterns = [
     path('profile/upload-pic/', UploadProfilePicView.as_view(), name='profile-upload-pic'),
     path('payments/verify/', VerifyPaymentAPIView.as_view(), name='verify-payment'),
     path('workout/plan/', UserWorkoutPlanAPI.as_view(), name='workout-plan'),
+    path('dashboard/stats/', DashboardStatsAPI.as_view(), name='dashboard-stats'),
     path('workout/feedback/', WorkoutFeedbackAPI.as_view(), name='workout-feedback'),
     path('workout/explain/', WorkoutExplanationAPI.as_view(), name='workout-explain'),
     

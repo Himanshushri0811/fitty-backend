@@ -2,6 +2,8 @@ from django.urls import path
 from .views import (
     GenerateWorkoutPlanView, 
     ActiveWorkoutPlanView, 
+    SaveWorkoutPlanView,
+    ExerciseLibraryView,
     ExerciseListView, 
     ExerciseDetailView, 
     AdminExerciseVideoUploadView,
@@ -13,6 +15,8 @@ from .views import (
 urlpatterns = [
     path('generate/', GenerateWorkoutPlanView.as_view(), name='generate-workout'),
     path('current/', ActiveWorkoutPlanView.as_view(), name='current-plan'),
+    path('save/', SaveWorkoutPlanView.as_view(), name='save-plan'),
+    path('library/', ExerciseLibraryView.as_view(), name='exercise-library'),
     path('exercises/', ExerciseListView.as_view(), name='exercise-list'),
     path('exercises/<str:id>/', ExerciseDetailView.as_view(), name='exercise-detail'),
     

@@ -9,8 +9,8 @@ class PostureRule(me.EmbeddedDocument):
     # For now we store the configuration parameters.
     check_type = me.StringField() # e.g. "angle_range"
     keypoints = me.ListField(me.IntField()) # [11, 13, 15]
-    min_val = me.FloatField()
-    max_val = me.FloatField()
+    min_val = me.FloatField(default=0.0)
+    max_val = me.FloatField(default=180.0)
 
 class Exercise(me.Document):
     meta = {'collection': 'exercises'}

@@ -91,10 +91,30 @@ def generate_workout_plan_json(user_profile):
     Generates a full 7-day workout plan in JSON format based on user profile.
     """
     import json
+    import re
     
     client = get_gemini_client()
     if not client:
         return None
+
+    # Load existing exercise library names to ground Gemini
+    allowed_exercises = ""
+    try:
+        from workouts.models import Exercise
+        names = [e.name for e in Exercise.objects().only('name')[:150]]
+        if names:
+            allowed_exercises = f"\nChoose ONLY exercises from this list:\n{', '.join(names)}\n"
+    except Exception:
+        pass
+
+    equipment = user_profile.get('equipment', ['None'])
+    if isinstance(equipment, list):
+        equipment_str = ', '.join(equipment) if equipment else 'None'
+    else:
+        equipment_str = str(equipment)
+
+    focus = user_profile.get('focus', [])
+    focus_str = ', '.join(focus) if isinstance(focus, list) and focus else 'All major muscle groups'
 
     # Construct the Prompt
     prompt = f"""
@@ -107,16 +127,19 @@ def generate_workout_plan_json(user_profile):
     - Weight: {user_profile.get('weight', 'N/A')}
     - Goal: {user_profile.get('goal', 'General Fitness')}
     - Experience Level: {user_profile.get('experience', 'Beginner')}
-    - Equipment Available: {', '.join(user_profile.get('equipment', ['None']))}
+    - Equipment Available: {equipment_str}
     - Injuries/Limitations: {user_profile.get('injuries', 'None')}
-    - Days Per Week: {user_profile.get('days_available', 7)}
-
+    - Days Per Week: {user_profile.get('days_available', 5)}
+    - Session Duration: {user_profile.get('duration_min', 45)} minutes
+    - Focus Areas: {focus_str}
+    {allowed_exercises}
     CRITICAL INSTRUCTIONS:
-    1. Return ONLY valid JSON. No markdown, no explanations.
-    2. The JSON structure must be exactly:
+    1. Return ONLY valid JSON. No markdown fences, no explanations.
+    2. Avoid any exercises that could aggravate the listed injuries.
+    3. The JSON structure must be exactly:
     {{
-        "plan_name": "Short catchy name for the plan",
-        "goal_summary": "Brief explanation of why this plan works",
+        "plan_name": "Catchy Plan Name",
+        "goal_summary": "Brief explanation",
         "days": [
             {{
                 "day_name": "Monday",
@@ -130,29 +153,39 @@ def generate_workout_plan_json(user_profile):
                         "notes": "Tip for form"
                     }}
                 ]
-            }},
-            ... (for all 7 days, use 'Rest' for rest days)
+            }}
         ]
     }}
-    3. Ensure exercises match the equipment available.
-    4. Vary the rep ranges based on the goal (e.g., lower reps for strength, higher for endurance).
-    5. Include 7 days explicitly (Monday to Sunday).
+    4. Include 7 days (Monday through Sunday). Use focus_area: "Rest" and empty exercises array [] for rest days.
     """
 
     try:
         # Use Controlled Generation for JSON
+        config = {
+            "response_mime_type": "application/json",
+            "temperature": 0.4,
+        }
         response = client.models.generate_content(
             model=DEFAULT_MODEL,
             contents=prompt,
-            config={
-                "response_mime_type": "application/json"
-            }
+            config=config
         )
         
-        # Parse JSON
-        plan_data = json.loads(response.text)
-        return plan_data
+        raw_text = response.text.strip()
+        # Defensive cleanup: strip code fences or surrounding text
+        raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
+        raw_text = re.sub(r'\s*```$', '', raw_text)
+        start_idx = raw_text.find('{')
+        end_idx = raw_text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            raw_text = raw_text[start_idx:end_idx+1]
+
+        plan_data = json.loads(raw_text)
+        if isinstance(plan_data, dict) and 'days' in plan_data:
+            return plan_data
+        return None
         
     except Exception as e:
         print(f"Workout Generation Error: {e}")
         return None
+
