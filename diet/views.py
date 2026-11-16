@@ -1,443 +1,818 @@
-from rest_framework.views import APIView
+import difflib
+import logging
+import re
+import uuid
+from datetime import datetime
+
+from django.core.cache import cache
+from mongoengine.errors import ValidationError
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework import status
-import random
+from rest_framework.views import APIView
 
-from .models import DietProfile, FoodItem, DietPlan, MealItem
+from .models import DietProfile, FoodItem, DietPlan, MealItem, DailyDietLog, LoggedEntry
 from .serializers import DietProfileSerializer, FoodItemSerializer, DietPlanSerializer
-from .utils import calculate_target_calories, get_or_create_weekly_plan
+from .seed_data import FOODS
+from .utils import (
+    DAYS, calculate_targets, calculate_target_calories, get_or_create_weekly_plan,
+    generate_new_plan, map_goal, allowed_types_for, expand_terms, is_blocked,
+    item_macros, round_half,
+)
 
-# Lazy Import to avoid circular dependencies if any
+logger = logging.getLogger(__name__)
+
+MEAL_TYPES = ('Breakfast', 'Lunch', 'Dinner', 'Snack')
+MAX_AI_PER_CAROUSEL = 2  # ek request me zyada se zyada itne foods ke liye AI call
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
 def get_ai_generator():
     from ai.services.food_generator import generate_food_persona
     return generate_food_persona
 
+
+def _auth_user(request):
+    user = getattr(request, 'user', None)
+    if not user or not getattr(user, 'id', None):
+        return None
+    return user
+
+
+def _parse_date(raw):
+    try:
+        return datetime.strptime(str(raw), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return datetime.now().date()
+
+
+def _num(value, lo, hi, default=0.0):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v:  # NaN
+        return default
+    return max(lo, min(hi, v))
+
+
+def _norm(s):
+    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9 ]', ' ', (s or '').lower())).strip()
+
+
+def _truthy(v):
+    return str(v).strip().lower() in ('1', 'true', 'yes')
+
+
+def _rate_limited(user, key, limit, window=3600):
+    """Simple per-user counter (Django cache). Cache fail ho to block nahi karte."""
+    k = f'diet_rl:{key}:{user.id}'
+    try:
+        if cache.add(k, 1, window):
+            return False
+        try:
+            n = cache.incr(k)
+        except ValueError:
+            cache.set(k, 1, window)
+            n = 1
+        return n > limit
+    except Exception:
+        return False
+
+
+def _targets_from_profile(profile):
+    cal = (profile.target_calories if profile else None) or 2000
+    return {
+        'calories': cal,
+        'protein': (profile.target_protein if profile and profile.target_protein else int(cal * 0.30 / 4)),
+        'carbs': (profile.target_carbs if profile and profile.target_carbs else int(cal * 0.40 / 4)),
+        'fats': (profile.target_fats if profile and profile.target_fats else int(cal * 0.30 / 9)),
+        'water': (profile.water_target if profile and profile.water_target else 8),
+    }
+
+
+def _get_log(user, date_str):
+    log = DailyDietLog.objects(user=user, date=date_str).first()
+    if not log:
+        log = DailyDietLog(user=user, date=date_str)
+    # Purane logs (jab sirf total_calories store hota tha) kho na jayein
+    if not log.entries and log.total_calories and not log.legacy_calories:
+        log.legacy_calories = log.total_calories
+    return log
+
+
+def _consumed(log):
+    return {
+        'calories': log.total_calories or 0,
+        'protein': log.total_protein or 0,
+        'carbs': log.total_carbs or 0,
+        'fats': log.total_fats or 0,
+        'fiber': log.total_fiber or 0,
+        'water': log.water_intake or 0,
+    }
+
+
+def _entry_dict(e):
+    return {
+        'entry_id': e.entry_id,
+        'ref': e.ref or '',
+        'meal_type': e.meal_type,
+        'time': e.time,
+        'text': e.text,
+        'items': list(e.items or []),
+        'calories': round(e.calories or 0),
+        'protein': round(e.protein or 0, 1),
+        'carbs': round(e.carbs or 0, 1),
+        'fats': round(e.fats or 0, 1),
+        'source': e.source,
+    }
+
+
+def _sync_user_log(user, d, consumed_cal, water=None):
+    """Dashboard (User.daily_calories_log) ko diet log ke saath same rakho. Fail ho to ignore."""
+    try:
+        from accounts.models import DailyCalorieLog
+        target = None
+        for entry in (user.daily_calories_log or []):
+            ed = entry.date.date() if isinstance(entry.date, datetime) else entry.date
+            if ed == d:
+                target = entry
+                break
+        if target is None:
+            target = DailyCalorieLog(date=d, calories_burned=0.0)
+            user.daily_calories_log.append(target)
+        target.calories_consumed = float(consumed_cal)
+        if water is not None:
+            target.water_intake_glasses = int(water)
+        user.save()
+    except Exception:
+        logger.warning('user calorie log sync failed', exc_info=True)
+
+
+def _save_log(user, log, d):
+    log.recompute()
+    log.save()
+    _sync_user_log(user, d, log.total_calories, log.water_intake)
+
+
+def _clean_items(detail):
+    out = []
+    if not isinstance(detail, list):
+        return out
+    for it in detail[:20]:
+        if not isinstance(it, dict):
+            continue
+        out.append({
+            'name': str(it.get('name') or '')[:60],
+            'quantity': _num(it.get('quantity'), 0, 50, 1),
+            'unit': str(it.get('unit') or '')[:20],
+            'calories': round(_num(it.get('calories'), 0, 6000), 1),
+            'protein': round(_num(it.get('protein'), 0, 500), 1),
+            'carbs': round(_num(it.get('carbs'), 0, 800), 1),
+            'fats': round(_num(it.get('fats'), 0, 500), 1),
+            'source': str(it.get('source') or 'ai')[:10],
+        })
+    return out
+
+
+def _default_meal_type():
+    h = datetime.now().hour
+    return 'Breakfast' if h < 11 else 'Lunch' if h < 16 else 'Snack' if h < 19 else 'Dinner'
+
+
+# ============================================================================
+# PROFILE
+# ============================================================================
 class DietProfileView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        profile = DietProfile.objects(user=request.user).first()
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+        profile = DietProfile.objects(user=user).first()
         if not profile:
             return Response({"message": "Profile not setup"}, status=404)
-        
-        serializer = DietProfileSerializer(profile)
-        return Response(serializer.data)
+        return Response(DietProfileSerializer(profile).data)
 
     def post(self, request):
-        data = request.data
-        profile = DietProfile.objects(user=request.user).first()
-        
-        if 'target_calories' not in data or not data['target_calories']:
-            cal_target = calculate_target_calories(request.user, data.get('goal', 'Maintenance'))
-            data['target_calories'] = cal_target
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+
+        data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
+        profile = DietProfile.objects(user=user).first()
+
+        goal = data.get('goal') or (profile.goal if profile else None) or map_goal(getattr(user, 'goal', ''))
+        data['goal'] = goal
+
+        # Targets: naye profile, goal change, ya explicit 'recalculate_targets' par hi dobara nikalo
+        goal_changed = bool(profile) and profile.goal != goal
+        need = (not profile) or goal_changed or _truthy(data.get('recalculate_targets')) \
+            or (profile and not profile.target_protein)
+        if need:
+            t = calculate_targets(user, goal)
+            if not data.get('target_calories'):
+                data['target_calories'] = t['calories']
+            for k in ('protein', 'carbs', 'fats'):
+                if not data.get(f'target_{k}'):
+                    data[f'target_{k}'] = t[k]
 
         if profile:
+            before = self._snapshot(profile)
             serializer = DietProfileSerializer(profile, data=data, partial=True)
         else:
+            before = None
             serializer = DietProfileSerializer(data=data)
-        
-        if serializer.is_valid():
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        try:
             if not profile:
-                profile = serializer.save(user=request.user)
-                get_or_create_weekly_plan(request.user) # First time
+                profile = serializer.save(user=user)
+                get_or_create_weekly_plan(user)
             else:
                 serializer.save()
-                # If profile updated, we should ideally refresh the plan to match new goal/budget
-                # But to avoid losing progress, maybe we make this optional? 
-                # For now, let's FORCE it for the "Smart" experience.
-                from .utils import generate_new_plan
-                generate_new_plan(request.user)
-                
-            return Response(serializer.data)
-        return Response(serializer.errors, status=400)
+                profile = DietProfile.objects(user=user).first()
+                # Plan tabhi regenerate karo jab plan ko affect karne wali cheez badli ho
+                if before != self._snapshot(profile):
+                    generate_new_plan(user)
+        except Exception as e:
+            logger.error('Diet profile save failed', exc_info=True)
+            return Response({"error": "Profile save nahi hua", "details": str(e)}, status=500)
+        return Response(serializer.data)
 
+    @staticmethod
+    def _snapshot(p):
+        return (
+            p.goal, p.diet_type, p.budget_level,
+            tuple(sorted(a.lower() for a in (p.allergies or []))),
+            tuple(sorted(a.lower() for a in (p.dislikes or []))),
+        )
+
+
+# ============================================================================
+# PLAN
+# ============================================================================
 class WeeklyPlanView(APIView):
+    """GET /plan/  (?force=true => naya plan banao)"""
     permission_classes = [AllowAny]
 
     def get(self, request):
-        plan = get_or_create_weekly_plan(request.user)
-        
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+
+        profile = DietProfile.objects(user=user).first()
+        if not profile:
+            return Response({"message": "Could not generate plan. Please ensure profile is set and foods exist."},
+                            status=400)
+        try:
+            force = _truthy(request.query_params.get('force', 'false'))
+            plan = generate_new_plan(user) if force else get_or_create_weekly_plan(user)
+        except Exception as e:
+            logger.error('Plan generation failed', exc_info=True)
+            return Response({"message": "Plan generate nahi hua", "details": str(e)}, status=500)
+
         if not plan:
-            # Check why
-            profile = DietProfile.objects(user=request.user).first()
-            return Response({"message": "Could not generate plan. Please ensure profile is set and foods exist."}, status=400)
-        serializer = DietPlanSerializer(plan)
-        
-        # Fetch targets from profile
-        profile = DietProfile.objects(user=request.user).first()
-        target_calories = profile.target_calories if profile else 2000
-        # Estimate Protein target (approx 30% of calories)
-        target_protein = int((target_calories * 0.3) / 4)
-        
+            return Response({"message": "Could not generate plan. Please ensure profile is set and foods exist."},
+                            status=400)
+
         return Response({
-            "plan": serializer.data,
-            "targets": {
-                "calories": target_calories,
-                "protein": target_protein
-            }
+            "plan": DietPlanSerializer(plan).data,
+            "targets": _targets_from_profile(profile),
         })
 
+
+# ============================================================================
+# SEARCH / REPLACE
+# ============================================================================
 class FoodSearchView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        query = request.query_params.get('q', '')
+        query = (request.query_params.get('q', '') or '').strip()[:60]
         if not query:
             return Response([])
         foods = FoodItem.objects(name__icontains=query).limit(10)
-        serializer = FoodItemSerializer(foods, many=True)
-        return Response(serializer.data)
+        return Response(FoodItemSerializer(foods, many=True).data)
+
 
 class ReplaceMealView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        day = request.data.get('day', '').lower()
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+
+        day = (request.data.get('day') or '').lower()
         period = request.data.get('period')
-        index = int(request.data.get('index', 0))
-        food_id = request.data.get('food_id') # If manual selection
-        smart_option = request.data.get('replace_mode') # 'similar', 'high_protein', 'budget', 'fast'
+        try:
+            index = int(request.data.get('index', 0))
+        except (TypeError, ValueError):
+            return Response({"error": "Invalid index"}, status=400)
+        food_id = request.data.get('food_id')
+        smart_option = request.data.get('replace_mode')
 
-        plan = DietPlan.objects(user=request.user, is_active=True).first()
-        if not plan: return Response({"error": "No active plan"}, 404)
-        if not hasattr(plan, day): return Response({"error": "Invalid day"}, 400)
+        profile = DietProfile.objects(user=user).first()
+        plan = DietPlan.objects(user=user, is_active=True).first()
+        if not plan or not profile:
+            return Response({"error": "No active plan"}, status=404)
+        if day not in DAYS:
+            return Response({"error": "Invalid day"}, status=400)
 
-        day_slots = getattr(plan, day)
-        target_slot = next((slot for slot in day_slots if slot.name == period), None)
-        if not target_slot: return Response({"error": "Meal slot not found"}, 404)
-        if index < 0 or index >= len(target_slot.items): return Response({"error": "Item index out of bounds"}, 400)
-        
-        current_meal = target_slot.items[index]
-        current_cals = current_meal.calories_snapshot
-        
-        food = None
-        reason = "Manual replacement."
+        slot = next((s for s in getattr(plan, day) if s.name == period), None)
+        if not slot:
+            return Response({"error": "Meal slot not found"}, status=404)
+        if index < 0 or index >= len(slot.items):
+            return Response({"error": "Item index out of bounds"}, status=400)
+
+        current = slot.items[index]
+        current_cals = current.calories_snapshot or 0
+        try:
+            current_food_id = current.food_item.id if current.food_item else None
+        except Exception:
+            current_food_id = None
+
+        food, reason, qty = None, "Manual replacement.", 1.0
 
         if food_id:
-            food = FoodItem.objects(id=food_id).first()
-        elif smart_option:
-            # AUTO-FIND LOGIC based on Context
             try:
-                current_food_id = current_meal.food_item.id if current_meal.food_item else None
-            except Exception: # Handle broken references (DoesNotExist)
-                current_food_id = None
-            
-            # Base query: Exclude current food, match slot, match diet type
-            profile = DietProfile.objects(user=request.user).first()
-            allowed_types = [profile.diet_type]
-            if profile.diet_type == 'Non-Veg': allowed_types += ['Veg', 'Egg']
-            
-            query = FoodItem.objects(type__in=allowed_types, id__ne=current_food_id)
-            # Filter by slot (must be suitable for period e.g. Breakfast)
-            # We filter in python for flexibility or complex list match
-            candidates = [f for f in query if period in (f.best_time or [])]
-            if not candidates: candidates = list(query) # Fallback
+                food = FoodItem.objects(id=food_id).first()
+            except ValidationError:
+                food = None
+        elif smart_option:
+            blocked = expand_terms((profile.allergies or []) + (profile.dislikes or []))
+            query = FoodItem.objects(type__in=allowed_types_for(profile.diet_type))
+            pool = [f for f in query if f.id != current_food_id and not is_blocked(f, blocked)]
+            cands = [f for f in pool if period in (f.best_time or [])] or pool
+            if not cands:
+                return Response({"error": "Koi suitable replacement nahi mila"}, status=404)
 
             if smart_option == 'high_protein':
-                # Sort by Protein desc
-                candidates.sort(key=lambda x: x.protein, reverse=True)
-                food = candidates[0] if candidates else None
-                reason = f"Switched to {food.name} for higher protein ({food.protein}g) to support muscle repair."
-            
+                cands.sort(key=lambda x: (x.protein or 0) / max(x.calories or 1, 1), reverse=True)
+                food = cands[0]
+                reason = f"Switched to {food.name} for higher protein ({food.protein}g per serving)."
             elif smart_option == 'budget':
-                # Prefer Low > Medium > High
-                budget_map = {'Low': 3, 'Medium': 2, 'High': 1}
-                candidates.sort(key=lambda x: budget_map.get(x.budget, 0), reverse=True)
-                food = candidates[0] if candidates else None
-                reason = f"Switched to a wallet-friendly option ({food.budget} Budget)."
-            
+                order = {'Low': 3, 'Medium': 2, 'High': 1}
+                cands.sort(key=lambda x: order.get(x.budget, 0), reverse=True)
+                food = cands[0]
+                reason = f"Switched to a wallet-friendly option ({food.budget} budget)."
             elif smart_option == 'fast':
-                 # Sort by Prep Time
-                candidates.sort(key=lambda x: x.prep_time)
-                food = candidates[0] if candidates else None
+                cands.sort(key=lambda x: x.prep_time or 999)
+                food = cands[0]
                 reason = f"Quick fix! {food.name} takes only {food.prep_time} mins to prep."
-            
-            else: # 'similar' or default
-                # Find closest calories
-                candidates.sort(key=lambda x: abs(x.calories - current_cals))
-                food = candidates[0] if candidates else None
+            else:  # similar
+                cands.sort(key=lambda x: abs((x.calories or 0) - current_cals))
+                food = cands[0]
                 reason = f"Replaced with {food.name} as a calorie-matched alternative."
 
-        if not food:
-            return Response({"error": "Food not found or no smart match"}, 404)
+            # Din ka total na bigde: calories ke hisaab se quantity
+            if food.calories:
+                qty = max(0.5, min(round_half(current_cals / food.calories), 2.5)) if current_cals else 1.0
 
-        new_meal_item = MealItem(
-            food_item=food,
-            quantity=1, 
-            calories_snapshot=food.calories,
-            custom_name=None
-        )
-        
-        target_slot.items[index] = new_meal_item
+        if not food:
+            return Response({"error": "Food not found or no smart match"}, status=404)
+
+        from .utils import make_meal_item
+        slot.items[index] = make_meal_item(food, qty)
         plan.save()
-        
+
         return Response({
-            "message": "Meal updated successfully", 
+            "message": "Meal updated successfully",
             "new_food": food.name,
-            "reason": reason
+            "reason": reason,
+            "quantity": qty,
+            "calories": int(round((food.calories or 0) * qty)),
         })
 
+
+# ============================================================================
+# SEED (ADMIN ONLY)
+# ============================================================================
 class SeedFoodView(APIView):
-    permission_classes = [AllowAny] 
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        foods = [
-            {"name": "Oats Upma", "calories": 250, "serving_unit": "1 bowl", "type": "Veg", "protein": 8, "carbs": 40, "fats": 5, "cuisine": "Indian"},
-            {"name": "Poha", "calories": 270, "serving_unit": "1 plate", "type": "Veg", "protein": 5, "carbs": 50, "fats": 7, "cuisine": "Indian"},
-            {"name": "Paneer Bhurji", "calories": 300, "serving_unit": "150g", "type": "Veg", "protein": 18, "carbs": 5, "fats": 22, "cuisine": "Indian"},
-            {"name": "Dal Tadka", "calories": 180, "serving_unit": "1 bowl", "type": "Veg", "protein": 10, "carbs": 25, "fats": 6, "cuisine": "Indian"},
-            {"name": "Chicken Curry", "calories": 350, "serving_unit": "1 bowl", "type": "Non-Veg", "protein": 30, "carbs": 10, "fats": 15, "cuisine": "Indian"},
-            {"name": "Grilled Fish", "calories": 220, "serving_unit": "1 fillet", "type": "Non-Veg", "protein": 25, "carbs": 0, "fats": 10, "cuisine": "Global"},
-            {"name": "Roti", "calories": 100, "serving_unit": "1 piece", "type": "Veg", "protein": 3, "carbs": 20, "fats": 1, "cuisine": "Indian"},
-            {"name": "Brown Rice", "calories": 210, "serving_unit": "1 cup cooked", "type": "Veg", "protein": 5, "carbs": 44, "fats": 2, "cuisine": "Global"},
-            {"name": "Boiled Eggs", "calories": 140, "serving_unit": "2 large", "type": "Egg", "protein": 12, "carbs": 1, "fats": 10, "cuisine": "Global"},
-        ]
-        
-        count = 0
-        for f in foods:
-            if not FoodItem.objects(name=f['name']).first():
+        user = _auth_user(request)
+        if not user or getattr(user, 'role', 'USER') != 'ADMIN':
+            return Response({"error": "Admin access required"}, status=403)
+
+        created = updated = 0
+        for f in FOODS:
+            doc = FoodItem.objects(name=f['name']).first()
+            if not doc:
                 FoodItem(**f).save()
-                count += 1
-                
-        return Response({"message": f"Seeded {count} foods"})
+                created += 1
+                continue
+            changed = False
+            # Sirf khali fields bharo, purana curated data mat chhedo
+            for k in ('best_time', 'goal_tags', 'tags'):
+                if not getattr(doc, k) and f.get(k):
+                    setattr(doc, k, f[k])
+                    changed = True
+            if not doc.fiber and f.get('fiber'):
+                doc.fiber = f['fiber']
+                changed = True
+            if changed:
+                doc.save()
+                updated += 1
+        return Response({"message": f"Seeded {created} foods, updated {updated}"})
 
-# ---------------------------------------------------
-# NEW: AI SMART BOX VIEW
-# ---------------------------------------------------
 
+# ============================================================================
+# AI SMART BOX
+# ============================================================================
 class DietCarouselView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+        user_name = getattr(user, 'name', None) or "Friend"
+
+        profile = DietProfile.objects(user=user).first()
+        goal = profile.goal if profile else "Healthy"
+        diet_type = profile.diet_type if profile else "Veg"
+        allowed = allowed_types_for(diet_type)
+        blocked = expand_terms(((profile.allergies or []) + (profile.dislikes or [])) if profile else [])
+
+        if FoodItem.objects(type__in=allowed).count() < 10 and not _rate_limited(user, 'discover', 2, 3600):
+            try:
+                from ai.services.food_discovery import discover_new_foods
+                discover_new_foods(goal, diet_type)
+            except Exception:
+                logger.warning('food discovery failed', exc_info=True)
+
+        sample = list(FoodItem.objects.aggregate(
+            {"$match": {"type": {"$in": allowed}}}, {"$sample": {"size": 15}}))
+
+        gen_func = get_ai_generator()
+        ai_budget = MAX_AI_PER_CAROUSEL if not _rate_limited(user, 'persona', 30, 3600) else 0
+        results = []
+
+        for row in sample:
+            if len(results) >= 5:
+                break
+            doc = FoodItem.objects(id=row['_id']).first()
+            if not doc or is_blocked(doc, blocked):
+                continue
+
+            persona = doc.ai_persona_text
+            if not persona:
+                if ai_budget > 0:
+                    ai_budget -= 1
+                    content = gen_func(doc.name, user_name, f"{doc.calories} cal, {doc.protein}g protein")
+                    if content and not content.get('fallback'):
+                        doc.ai_persona_text = content.get("persona_text", "")
+                        doc.benefits = content.get("benefits", [])
+                        doc.fitness_relevance = content.get("fitness_relevance", "")
+                        if not doc.image_url:
+                            doc.image_url = f"https://placehold.co/400x300?text={doc.name.replace(' ', '+')}"
+                        doc.save()
+                        persona = doc.ai_persona_text
+                if not persona:  # AI nahi chala: temporary text, DB me SAVE nahi karte
+                    persona = f"Namaste {user_name}, main {doc.name} hoon. {doc.calories} calories aur {doc.protein}g protein ke saath."
+
+            results.append({
+                "id": str(doc.id),
+                "name": doc.name,
+                "image_url": doc.image_url or f"https://placehold.co/400x300?text={doc.name.replace(' ', '+')}",
+                "persona_text": persona,
+                "fitness_relevance": doc.fitness_relevance or "",
+                "benefits": doc.benefits or [],
+                "macros": {"calories": doc.calories, "protein": doc.protein,
+                           "carbs": doc.carbs, "fats": doc.fats},
+            })
+        return Response(results)
+
+
+class DietFoodDetailView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, id):
+        try:
+            food = FoodItem.objects(id=id).first()
+        except ValidationError:
+            food = None
+        if not food:
+            return Response({"error": "Not Found"}, status=404)
+
+        ai_data = food.deep_dive_data or None  # cache
+        if not ai_data:
+            user = _auth_user(request)
+            if user and _rate_limited(user, 'deepdive', 30, 3600):
+                return Response({"error": "Thoda ruko, bahut zyada requests. Kuch der baad try karo."}, status=429)
+            from ai.services.food_generator import generate_food_deep_dive
+            ai_data = generate_food_deep_dive(food.name)
+            if ai_data and not ai_data.get('fallback'):
+                food.deep_dive_data = ai_data
+                food.save()
+
+        response_data = dict(FoodItemSerializer(food).data)
+        response_data['deep_dive'] = ai_data
+
+        img = response_data.get('image_url', "")
+        if not img or "unsplash" in img:
+            response_data['image_url'] = f"https://placehold.co/600x400/2a2a35/FFF?text={food.name.replace(' ', '+')}"
+        return Response(response_data)
+
+
+# ============================================================================
+# NATURAL LANGUAGE LOGGER
+# ============================================================================
+def _match_food(name, lib):
+    key = _norm(name)
+    if not key:
+        return None
+    if key in lib:
+        return lib[key]
+    tokens = set(key.split())
+    subset = [k for k in lib if tokens <= set(k.split())]
+    if len(subset) == 1:
+        return lib[subset[0]]
+    close = difflib.get_close_matches(key, list(lib.keys()), n=1, cutoff=0.85)
+    return lib[close[0]] if close else None
+
+
+def _enrich_with_db(result):
+    """AI ke estimates ko apne FoodItem DB se verify karo (DB ho to wahi sahi macros)."""
+    detail = result.get('items_detail')
+    if not isinstance(detail, list) or not detail:
+        for k, hi in (('total_calories', 6000), ('total_protein', 500), ('total_carbs', 800), ('total_fats', 500)):
+            result[k] = round(_num(result.get(k), 0, hi), 1)
+        result.setdefault('items', [])
+        return result
+
+    lib = {_norm(f.name): f for f in FoodItem.objects()}
+    lines = []
+    for d in detail[:20]:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get('name') or '').strip()[:60]
+        if not name:
+            continue
+        qty = _num(d.get('quantity'), 0.1, 50, 1)
+        line = {
+            'name': name, 'quantity': qty, 'unit': str(d.get('unit') or '')[:20],
+            'calories': _num(d.get('calories'), 0, 6000), 'protein': _num(d.get('protein'), 0, 500),
+            'carbs': _num(d.get('carbs'), 0, 800), 'fats': _num(d.get('fats'), 0, 500),
+            'fiber': _num(d.get('fiber'), 0, 200), 'source': 'ai',
+        }
+        match = _match_food(name, lib)
+        if match and qty <= 10:
+            line.update({
+                'calories': match.calories * qty, 'protein': (match.protein or 0) * qty,
+                'carbs': (match.carbs or 0) * qty, 'fats': (match.fats or 0) * qty,
+                'fiber': (match.fiber or 0) * qty,
+                'source': 'db', 'matched_name': match.name, 'food_id': str(match.id),
+            })
+        for k in ('calories', 'protein', 'carbs', 'fats', 'fiber'):
+            line[k] = round(line[k], 1)
+        lines.append(line)
+
+    result['items_detail'] = lines
+    result['items'] = [f"{l['quantity']:g} {l['name']}" for l in lines]
+    result['total_calories'] = round(sum(l['calories'] for l in lines))
+    result['total_protein'] = round(sum(l['protein'] for l in lines), 1)
+    result['total_carbs'] = round(sum(l['carbs'] for l in lines), 1)
+    result['total_fats'] = round(sum(l['fats'] for l in lines), 1)
+    return result
+
+
+class CalculateMacrosView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+        text = (request.data.get('text') or '').strip()
+        if not text:
+            return Response({"error": "Text is required"}, status=400)
+        if len(text) > 300:
+            return Response({"error": "Text bahut lamba hai (max 300 characters)"}, status=400)
+        if _rate_limited(user, 'macros', 30, 3600):
+            return Response({"error": "Bahut zyada requests. Thodi der baad try karo."}, status=429)
+
+        from ai.services.food_generator import calculate_macros_from_text
+        result = calculate_macros_from_text(text)
+        if not isinstance(result, dict) or "error" in result:
+            return Response(result if isinstance(result, dict) else {"error": "AI unavailable"}, status=503)
+        return Response(_enrich_with_db(result))
+
+
+# ============================================================================
+# LOGGING (single source of truth: DailyDietLog.entries)
+# ============================================================================
+class LogFoodView(APIView):
     """
-    Returns foods for the AI Smart Box. 
-    Triggers AI Generation if content is missing.
+    POST /log-food/
+    {date, items[], totals{total_calories,total_protein,total_carbs,total_fats},
+     items_detail[], meal_type, client_id, source}
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+
+        d = request.data
+        items = d.get('items') or []
+        if not items:
+            return Response({"error": "No items to log"}, status=400)
+
+        day = _parse_date(d.get('date'))
+        date_str = day.strftime('%Y-%m-%d')
+        totals = d.get('totals') or {}
+        log = _get_log(user, date_str)
+
+        client_id = str(d.get('client_id') or '')[:64]
+        if client_id:
+            dup = next((e for e in log.entries if e.client_id == client_id), None)
+            if dup:  # double click / retry
+                return Response({"message": "Already logged", "new_total": log.total_calories,
+                                 "entry_id": dup.entry_id, "consumed": _consumed(log)})
+
+        names = [(i.get('name') if isinstance(i, dict) else str(i))[:80] for i in items[:20]]
+        meal_type = d.get('meal_type') if d.get('meal_type') in MEAL_TYPES else _default_meal_type()
+        entry = LoggedEntry(
+            entry_id=uuid.uuid4().hex,
+            client_id=client_id or None,
+            meal_type=meal_type,
+            time=datetime.now().strftime('%I:%M %p'),
+            text=', '.join(names)[:300],
+            items=_clean_items(d.get('items_detail')),
+            calories=_num(totals.get('total_calories', totals.get('calories')), 0, 6000),
+            protein=_num(totals.get('total_protein', totals.get('protein')), 0, 500),
+            carbs=_num(totals.get('total_carbs', totals.get('carbs')), 0, 800),
+            fats=_num(totals.get('total_fats', totals.get('fats')), 0, 500),
+            source=str(d.get('source') or 'ai')[:10],
+        )
+        log.entries.append(entry)
+        try:
+            _save_log(user, log, day)
+        except Exception as e:
+            logger.error('Log save failed', exc_info=True)
+            return Response({"error": "Log save nahi hua", "details": str(e)}, status=500)
+
+        return Response({"message": "Logged successfully", "new_total": log.total_calories,
+                         "entry_id": entry.entry_id, "consumed": _consumed(log)})
+
+
+class RemoveLogEntryView(APIView):
+    """POST /log-food/remove/  {date, entry_id}"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+        day = _parse_date(request.data.get('date'))
+        log = _get_log(user, day.strftime('%Y-%m-%d'))
+        entry_id = request.data.get('entry_id')
+        before = len(log.entries)
+        log.entries = [e for e in log.entries if e.entry_id != entry_id]
+        if len(log.entries) == before:
+            return Response({"error": "Entry not found"}, status=404)
+        _save_log(user, log, day)
+        return Response({"message": "Removed", "consumed": _consumed(log)})
+
+
+class MarkMealEatenView(APIView):
+    """POST /mark-eaten/  {date, period, eaten?}  (eaten na do to toggle)"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+
+        day = _parse_date(request.data.get('date'))
+        period = request.data.get('period')
+        plan = DietPlan.objects(user=user, is_active=True).first()
+        if not plan:
+            return Response({"error": "No active plan"}, status=404)
+        slot = next((s for s in getattr(plan, DAYS[day.weekday()]) if s.name == period), None)
+        if not slot:
+            return Response({"error": "Meal slot not found"}, status=404)
+
+        log = _get_log(user, day.strftime('%Y-%m-%d'))
+        ref = f'plan:{period}'
+        existing = next((e for e in log.entries if e.ref == ref), None)
+        eaten = request.data.get('eaten')
+        eaten = (existing is None) if eaten is None else bool(eaten)
+
+        if eaten and not existing:
+            tot = {'calories': 0.0, 'protein': 0.0, 'carbs': 0.0, 'fats': 0.0, 'fiber': 0.0}
+            names = []
+            for it in slot.items:
+                m = item_macros(it)
+                for k in tot:
+                    tot[k] += m[k]
+                try:
+                    names.append(it.food_item.name if it.food_item else (it.custom_name or 'Item'))
+                except Exception:
+                    names.append(it.custom_name or 'Item')
+            log.entries.append(LoggedEntry(
+                entry_id=uuid.uuid4().hex, ref=ref,
+                meal_type=period if period in MEAL_TYPES else 'Snack',
+                time=datetime.now().strftime('%I:%M %p'),
+                text=', '.join(names)[:300], source='plan',
+                calories=tot['calories'], protein=tot['protein'], carbs=tot['carbs'],
+                fats=tot['fats'], fiber=tot['fiber'],
+            ))
+        elif not eaten and existing:
+            log.entries = [e for e in log.entries if e.ref != ref]
+
+        _save_log(user, log, day)
+        return Response({"eaten": eaten, "period": period, "new_total": log.total_calories,
+                         "consumed": _consumed(log)})
+
+
+class WaterLogView(APIView):
+    """POST /water/  {date, glasses} (absolute) ya {date, delta}"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
+        day = _parse_date(request.data.get('date'))
+        log = _get_log(user, day.strftime('%Y-%m-%d'))
+        if 'glasses' in request.data:
+            val = int(_num(request.data.get('glasses'), 0, 30, 0))
+        else:
+            val = (log.water_intake or 0) + int(_num(request.data.get('delta'), -30, 30, 1))
+        log.water_intake = max(0, min(30, val))
+        _save_log(user, log, day)
+        profile = DietProfile.objects(user=user).first()
+        return Response({"water": log.water_intake, "target": (profile.water_target if profile else 8) or 8})
+
+
+class DailySummaryView(APIView):
+    """
+    GET /daily-summary/?date=YYYY-MM-DD   (date = user ka LOCAL date)
+    Ek hi jagah se: targets, asli consumed, remaining, aaj ke entries, aaj ke planned meals (eaten flag ke saath).
     """
     permission_classes = [AllowAny]
 
     def get(self, request):
-        user_name = request.user.name or "Friend"
-        
-        # 0. Get User Context
-        profile = DietProfile.objects(user=request.user).first()
-        goal = profile.goal if profile else "Healthy"
-        diet_type = profile.diet_type if profile else "Veg"
+        user = _auth_user(request)
+        if not user:
+            return Response({"error": "Unauthorized"}, status=401)
 
-        # 1. Fetch foods suitable for the user (Goal + Diet)
-        # We try to find foods that match the goal OR just general healthy ones
-        
-        # Count existing relevant foods
-        # Filter Logic: Type matches AND (Goal matches OR generic)
-        # MongoEngine doesn't support easy OR query with text search mixed, so we do simple filtering
-        
-        relevant_count = FoodItem.objects(type=diet_type).count()
-        
-        # DYNAMIC DISCOVERY: If we have very few foods, fetch from AI
-        if relevant_count < 10:
-             # Lazy import discovery
-             from ai.services.food_discovery import discover_new_foods
-             # Trigger explicitly (blocking for now, ideally background task)
-             discover_new_foods(goal, diet_type)
+        day = _parse_date(request.query_params.get('date'))
+        date_str = day.strftime('%Y-%m-%d')
+        profile = DietProfile.objects(user=user).first()
+        targets = _targets_from_profile(profile)
+        log = _get_log(user, date_str)
+        consumed = _consumed(log)
 
-        # 2. Get Random Sample
-        pipeline = [
-            {"$match": {"type": diet_type}}, 
-            {"$sample": {"size": 5}}
-        ]
-        
-        random_foods = list(FoodItem.objects.aggregate(*pipeline))
-        
-        results = []
-        gen_func = get_ai_generator()
-        user_name = request.user.name or "Friend"
-        
-        for food_data in random_foods:
-            # Aggregate returns dict, not Document object.
-            # We need to update if fields are missing.
-            # Convert to ID to fetch Document for saving.
-            f_id = food_data['_id']
-            # We should refetch as Document to save updates easily
-            food_doc = FoodItem.objects(id=f_id).first()
-            if not food_doc: continue
-            
-            # Check if AI content exists
-            if not food_doc.ai_persona_text:
-                # Generate!
-                nutrient_summary = f"{food_doc.calories} cal, {food_doc.protein}g protein"
-                ai_content = gen_func(food_doc.name, user_name, nutrient_summary)
-                
-                food_doc.ai_persona_text = ai_content.get("persona_text", "")
-                food_doc.benefits = ai_content.get("benefits", [])
-                food_doc.fitness_relevance = ai_content.get("fitness_relevance", "")
-                # Default image if empty (Use a placeholder service or Unsplash if we had logic)
-                if not food_doc.image_url:
-                     # Simple logic: generated placeholder with text
-                     food_doc.image_url = f"https://placehold.co/400x300?text={food_doc.name.replace(' ', '+')}"
-                
-                food_doc.save()
-            
-            # Build Response
-            results.append({
-                "id": str(food_doc.id),
-                "name": food_doc.name,
-                "image_url": food_doc.image_url,
-                "persona_text": food_doc.ai_persona_text,
-                "fitness_relevance": food_doc.fitness_relevance,
-                "benefits": food_doc.benefits,
-                "macros": {
-                    "calories": food_doc.calories,
-                    "protein": food_doc.protein,
-                    "carbs": food_doc.carbs,
-                    "fats": food_doc.fats
-                }
-            })
-            
-        return Response(results)
+        eaten_refs = {e.ref for e in log.entries if e.ref}
+        planned = []
+        plan = DietPlan.objects(user=user, is_active=True).first()
+        if plan:
+            for slot in getattr(plan, DAYS[day.weekday()]):
+                if slot.name == 'Extras':  # purana bug: logs plan me 'Extras' ban ke aate the
+                    continue
+                cal = prot = 0.0
+                for it in slot.items:
+                    m = item_macros(it)
+                    cal += m['calories']
+                    prot += m['protein']
+                planned.append({
+                    'name': slot.name, 'time': slot.time,
+                    'is_eaten': f'plan:{slot.name}' in eaten_refs,
+                    'calories': round(cal), 'protein': round(prot, 1),
+                })
 
-class DietFoodDetailView(APIView):
-    permission_classes = [AllowAny]
-    
-    def get(self, request, id):
-        food = FoodItem.objects(id=id).first()
-        if not food: return Response({"error": "Not Found"}, 404)
-        
-        # Check if we have deep details (Using 'description' as proxy for long desc)
-        # Or better, just generate it on the fly and cache it in a new field if possible, 
-        # or just return it.
-        
-        from ai.services.food_generator import generate_food_deep_dive
-        
-        # If description is short, assume we need a deep dive
-        # Ideally we add a 'deep_dive_data' DictField to model, but for now let's just 
-        # return the AI generated data directly.
-        
-        ai_data = generate_food_deep_dive(food.name)
-        
-        # Merge with existing data
-        response_data = FoodItemSerializer(food).data
-        response_data['deep_dive'] = ai_data
-        
-        # Fix image if broken or using unsplash (basic check)
-        img_url = response_data.get('image_url', "")
-        if not img_url or "unsplash" in img_url:
-             # Fallback if unsplash links are dead
-             s_name = food.name.replace(" ", "+")
-             response_data['image_url'] = f"https://placehold.co/600x400/2a2a35/FFF?text={s_name}"
-        
-        return Response(response_data)
+        def pct(a, b):
+            return round(min(999, (a / b) * 100)) if b else 0
 
-class CalculateMacrosView(APIView):
-    """
-    Takes natural language food log and returns estimated nutrition via AI.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        text = request.data.get('text', '')
-        if not text:
-            return Response({"error": "Text is required"}, 400)
-        
-        # Lazy import
-        from ai.services.food_generator import calculate_macros_from_text
-        
-        result = calculate_macros_from_text(text)
-        
-        if "error" in result:
-             return Response(result, 500)
-             
-        return Response(result)
-
-class LogFoodView(APIView):
-    """
-    Saves a food log to the user's daily history.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        from datetime import datetime
-        
-        # 1. Get Data
-        date_str = request.data.get('date', datetime.now().strftime('%Y-%m-%d'))
-        items = request.data.get('items', []) # List of strings or objects
-        total_data = request.data.get('totals', {}) # {calories, protein...}
-        
-        if not items:
-            return Response({"error": "No items to log"}, 400)
-
-        # 2. Get or Create Daily Log
-        from .models import DailyDietLog, DailyMealSlot, MealItem, FoodItem
-        
-        daily_log = DailyDietLog.objects(user=request.user, date=date_str).first()
-        if not daily_log:
-            daily_log = DailyDietLog(user=request.user, date=date_str)
-        
-        # 3. Add to "Snacks/Other" or specific slot if provided
-        # For simple logger, we can just throw it into a generic "Logged" slot or append to 'Snacks'
-        # Let's create a dedicated "Logged" slot if it doesn't exist? 
-        # Or just append to 'consumed_meals'
-        
-        # Create a new slot for this entry (e.g., "Log at 8:30 PM")
-        time_now = datetime.now().strftime('%I:%M %p')
-        
-        # Create MealItems (Virtual, not linked to DB FoodItems necessarily)
-        meal_items = []
-        for item_name in items:
-            # Try to find food item matches? For now, raw.
-            # We rely on total_data for the nutrition.
-            # Distribute nutrition? Complex.
-            # SIMPLIFICATION: We store the Totals in the log mostly.
-            pass
-
-        # ACTUAL STRATEGY: 
-        # Use AI result to populate simple MealItems.
-        # Since we don't have per-item breakdown from the macro calc (it returns total), 
-        # we will create ONE MealItem representing the whole log text.
-        
-        log_text = ", ".join(items) 
-        
-        new_meal = MealItem(
-            custom_name=log_text,
-            calories_snapshot=total_data.get('total_calories', 0),
-            quantity=1
-        )
-        
-        # Manually attach protein/carbs/fats if we update MealItem model to support it?
-        # MealItem only has ReferenceField to FoodItem. 
-        # It relies on FoodItem for Macros.
-        # FIX: We need to either create a FoodItem on the fly OR add fields to MealItem.
-        # Given constraints, let's create a "Custom Log" FoodItem or just update DailyLog totals directly.
-        
-        daily_log.total_calories += int(total_data.get('total_calories', 0))
-        daily_log.save()
-        
-        # 4. ALSO UPDATE WEEKLY PLAN (For Immediate UI Reflection)
-        # We append this as an "Extra" meal to the current day in the Plan
-        day_name = datetime.now().strftime('%A').lower() # monday, tuesday...
-        plan = DietPlan.objects(user=request.user, is_active=True).first()
-        
-        if plan and hasattr(plan, day_name):
-            day_slots = getattr(plan, day_name)
-            
-            # Create a new MealItem 
-            # Note: MealItem needs a FoodItem reference usually for macros, 
-            # but we can use 'custom_name' + 'calories_snapshot'.
-            # However, our serializer might look for FoodItem.
-            # To fix 0 display, we need a dummy FoodItem or strict snapshot usage.
-            
-            # Create a "Custom Log" Food Item on the fly? 
-            # Or just use the snapshot logic we fixed earlier.
-            
-            log_item = MealItem(
-                custom_name=log_text,
-                calories_snapshot=int(total_data.get('total_calories', 0)),
-                quantity=1
-            )
-            
-            # Check if an "Extras" slot exists, else create one
-            extra_slot = next((s for s in day_slots if s.name == "Extras"), None)
-            if not extra_slot:
-                extra_slot = DailyMealSlot(name="Extras", time=time_now, items=[])
-                day_slots.append(extra_slot)
-                
-            extra_slot.items.append(log_item)
-            plan.save()
-
-        return Response({"message": "Logged successfully", "new_total": daily_log.total_calories})
+        return Response({
+            'date': date_str,
+            'targets': targets,
+            'consumed': consumed,
+            'remaining': {
+                'calories': max(0, targets['calories'] - consumed['calories']),
+                'protein': max(0, round(targets['protein'] - consumed['protein'], 1)),
+                'carbs': max(0, round(targets['carbs'] - consumed['carbs'], 1)),
+                'fats': max(0, round(targets['fats'] - consumed['fats'], 1)),
+                'water': max(0, targets['water'] - consumed['water']),
+            },
+            'percent': {
+                'calories': pct(consumed['calories'], targets['calories']),
+                'protein': pct(consumed['protein'], targets['protein']),
+                'carbs': pct(consumed['carbs'], targets['carbs']),
+                'fats': pct(consumed['fats'], targets['fats']),
+                'water': pct(consumed['water'], targets['water']),
+            },
+            'entries': [_entry_dict(e) for e in log.entries],
+            'planned_today': planned,
+        })

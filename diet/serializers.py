@@ -67,8 +67,13 @@ class MealItemSerializer(serializers.Serializer):
     
     # Calories: Use Snapshot if available, else fetch from Food Item
     calories = serializers.SerializerMethodField()
+    calories_snapshot = serializers.IntegerField(required=False)
+    protein_snapshot = serializers.FloatField(required=False)
+    carbs_snapshot = serializers.FloatField(required=False)
+    fats_snapshot = serializers.FloatField(required=False)
+
     def get_calories(self, obj):
-        if obj.calories_snapshot:
+        if getattr(obj, 'calories_snapshot', None) is not None:
             return obj.calories_snapshot
         # Fallback
         item = self.get_food_item(obj)
@@ -103,14 +108,20 @@ class MealItemSerializer(serializers.Serializer):
         return item.name if item else (obj.custom_name or "Unknown Item")
 
     def get_protein(self, obj):
+        if getattr(obj, 'protein_snapshot', None) is not None:
+            return obj.protein_snapshot
         item = self.get_food_item(obj)
         return item.protein if item else 0
 
     def get_carbs(self, obj):
+        if getattr(obj, 'carbs_snapshot', None) is not None:
+            return obj.carbs_snapshot
         item = self.get_food_item(obj)
         return item.carbs if item else 0
 
     def get_fats(self, obj):
+        if getattr(obj, 'fats_snapshot', None) is not None:
+            return obj.fats_snapshot
         item = self.get_food_item(obj)
         return item.fats if item else 0
 
