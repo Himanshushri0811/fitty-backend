@@ -15,9 +15,6 @@ venv/
 # =========================
 # Environment Variables
 # =========================
-.env
-.env.local
-.env.*
 !.env.example
 
 # =========================
@@ -43,7 +40,6 @@ _trash/
 # =========================
 .DS_Store
 Thumbs.db
-.vscode/
 .idea/
 
 # =========================
@@ -58,3 +54,5 @@ htmlcov/
 # =========================
 *.log
 *.pid
+config.bat
+node_modules

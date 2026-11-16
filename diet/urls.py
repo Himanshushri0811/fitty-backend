@@ -8,7 +8,16 @@ from .views import (
     DietCarouselView,
     DietFoodDetailView,
     CalculateMacrosView,
-    LogFoodView
+    LogFoodView,
+    DailySummaryView,
+    MarkMealEatenView,
+    RemoveLogEntryView,
+    WaterLogView
+)
+from .claude_views import (
+    ClaudeDietChatView,
+    ClaudeDietPlanView,
+    ClaudeDietSuggestionsView,
 )
 
 urlpatterns = [
@@ -23,4 +32,15 @@ urlpatterns = [
     path('foods/<str:id>/', DietFoodDetailView.as_view(), name='diet-food-detail'),
     path('calculate-macros/', CalculateMacrosView.as_view(), name='calculate-macros'),
     path('log-food/', LogFoodView.as_view(), name='log-food'),
+
+    # Daily Tracking Endpoints
+    path('daily-summary/', DailySummaryView.as_view(), name='diet-daily-summary'),
+    path('mark-eaten/', MarkMealEatenView.as_view(), name='diet-mark-eaten'),
+    path('log-food/remove/', RemoveLogEntryView.as_view(), name='diet-log-remove'),
+    path('water/', WaterLogView.as_view(), name='diet-water'),
+
+    # Claude Diet AI Endpoints
+    path('claude-chat/', ClaudeDietChatView.as_view(), name='claude-diet-chat'),
+    path('claude-plan/', ClaudeDietPlanView.as_view(), name='claude-diet-plan'),
+    path('claude-suggestions/', ClaudeDietSuggestionsView.as_view(), name='claude-diet-suggestions'),
 ]
